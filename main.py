@@ -257,8 +257,8 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🏢 PolarProperty Asia — официальный представитель ведущих застройщиков Таиланда.\n"  
             "✅ Работаем без комиссии для покупателя\n"
             "✅ Сопровождаем сделку на всех этапах\n"
-            "✅ Делаем дистанционные сделки\n"
-            "✅ Предлагаем только проверенные объекты\n"
+            "✅ Дистанционные сделки\n"
+            "✅ Проверенные объекты\n"
         )
         await query.message.reply_photo(
             photo=about_photo,
@@ -268,7 +268,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Далее остальные elif ...
+
     elif query.data.startswith("catalog"):
         parts = query.data.split("_")
         page = int(parts[1]) if len(parts) > 1 else 0
