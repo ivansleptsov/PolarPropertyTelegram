@@ -236,7 +236,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         contact_text = (
             " Наши контакты:\n"
             "✈️ Telegram: <a href=\"https://t.me/PolarProperty\">@PolarProperty</a>\n"
-            "📷 Instagram: <a href=\"https://www.instagram.com/polarproperty/\">@PolarProperty</a>\n"
+            "📷 Instagram: <a href=\"https://www.instagram.com/polar.property/\">@Polar.Property</a>\n"
             "💬 WhatsApp: <a href=\"https://wa.me/66968300106\"> Написать</a>\n"
             "📞 +66 96 830 01 06\n"
             "📍 Паттайя, Таиланд\n"
