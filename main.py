@@ -46,7 +46,7 @@ PAGE_SIZE = 5  # Количество объектов на страницу
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Главное меню"""
-    photo_url = "https://drive.google.com/uc?export=view&id=1ahC8y6rmPg4tmqIUP1dTDwWmNymn9D0w"
+    photo_url = "https://drive.google.com/uc?export=view&id=1yiRRSf7Ni8sB_nVm4DqRUNCHdDmQSKFm"
     text = (
         " Добро пожаловать в PolarProperty Asia! \n\n"
         "🏝 Мы помогаем купить или арендовать недвижимость в Паттайе и по всему Таиланду.\n\n"
@@ -196,7 +196,15 @@ async def get_properties():
         
 async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    # Ответ на callback: безопасно игнорируем устаревшие/недействительные callback'ы
+    try:
+        await query.answer()
+    except BadRequest as e:
+        err = str(e)
+        if "Query is too old" in err or "query id is invalid" in err or "response timeout" in err:
+            print(f"⚠️ Callback expired or invalid: {e}")
+        else:
+            raise
 
     if query.data == "buy_menu":
         keyboard = [
@@ -551,9 +559,23 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await add_selection_to_notion(user_name, username, user_id, data)
         return
 
-    
+    # Если было состояние — очищаем его
     if state:
         user_state[user_id] = None
+        return
+
+    # --- Обработка произвольного текста, когда бот не ожидает ввода ---
+    # Если пользователь просто пишет текст вне логики бота, даём вежливую подсказку
+    try:
+        await update.message.reply_text(
+            "Пожалуйста, не отправляйте произвольный текст. "
+            "Используйте меню (кнопки) или напишите /start, чтобы вернуться в главное меню. "
+            "Если хотите связаться с менеджером — нажмите «Чат с менеджером» в меню.",
+            reply_markup=get_back_button()
+        )
+    except Exception as e:
+        print(f"⚠️ Не удалось отправить подсказку пользователю {user_id}: {e}")
+    return
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обработка ошибок"""
@@ -571,11 +593,42 @@ def escape_html(text):
     return html.escape(str(text))
 
 async def add_request_to_notion(user_name, username, user_id, prop):
-    """Добавляет заявку в таблицу Notion"""
+    """Добавляет заявку в таблицу Notion. Пытаемся корректно получить ID объекта из разных мест и логируем результат."""
     from datetime import datetime
     try:
+        # Попытки получить ID объекта из prop
+        id_value = prop.get('id') if prop else None
+
+        # Если нет — пробуем page id из raw
+        if not id_value:
+            raw = prop.get('raw', {}) if prop else {}
+            id_value = raw.get('id')
+
+        # Ещё попытка: посмотреть в свойствах raw -> properties -> ID
+        if not id_value:
+            raw_props = (prop.get('raw', {}) or {}).get('properties', {}) if prop else {}
+            id_field = raw_props.get('ID') or raw_props.get('Id') or raw_props.get('id')
+            if id_field:
+                if isinstance(id_field.get('number'), (int, float)):
+                    id_value = str(id_field.get('number'))
+                elif id_field.get('type') == 'title':
+                    id_value = id_field.get('title', [{}])[0].get('text', {}).get('content', '')
+                elif id_field.get('type') == 'rich_text':
+                    id_value = ''.join([t.get('text', {}).get('content', '') for t in id_field.get('rich_text', [])])
+                else:
+                    for k in ('plain_text', 'text', 'content'):
+                        v = id_field.get(k)
+                        if v:
+                            id_value = v
+                            break
+
+        if not id_value:
+            id_value = ''
+
+        print(f"📥 Добавление заявки: object_id='{id_value}', project='{prop.get('project_name')}'")
+
         notion.pages.create(
-            parent={"database_id": NOTION_DATABASE_REQUESTS_ID},  # замените на ID вашей таблицы заявок
+            parent={"database_id": NOTION_DATABASE_REQUESTS_ID},
             properties={
                 "Пользователь": {
                     "title": [{"text": {"content": user_name}}]
@@ -590,7 +643,7 @@ async def add_request_to_notion(user_name, username, user_id, prop):
                     "rich_text": [{"text": {"content": prop.get('project_name', '')}}]
                 },
                 "ID объекта": {
-                    "rich_text": [{"text": {"content": str(prop.get('id', ''))}}]
+                    "rich_text": [{"text": {"content": str(id_value)}}]
                 },
                 "Источник": {
                     "rich_text": [{"text": {"content": "телеграм бот"}}]
@@ -647,17 +700,21 @@ async def create_catalog_pdf(properties, pdf_path):
     from fpdf import FPDF
 
     pdf = FPDF()
-    pdf.add_page()
     pdf.add_font('DejaVu', '', 'fonts/DejaVuSans.ttf')
     pdf.add_font('DejaVu', 'B', 'fonts/DejaVuSans-Bold.ttf')
-    pdf.set_font("DejaVu", size=12)
-    pdf.cell(200, 10, text="Каталог объектов PolarProperty", new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
-    pdf.ln(10)
 
     for idx, prop in enumerate(properties, 1):
+        # Новая страница для каждого объекта
+        pdf.add_page()
+
+        # Заголовок каталога (на каждой странице для удобства)
+        pdf.set_font("DejaVu", 'B', size=12)
+        pdf.cell(200, 10, text="Каталог объектов PolarProperty", new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
+        pdf.ln(10)
+
         # Название объекта
         pdf.set_font("DejaVu", 'B', size=12)
-        pdf.cell(0, 10, text=f"{idx}. {oneline(prop['project_name'])}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(0, 10, text=f"{idx}. {oneline(prop.get('project_name',''))}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(3)
 
         # Фото объекта (сразу после названия)
@@ -668,7 +725,12 @@ async def create_catalog_pdf(properties, pdf_path):
                 img_path = f"temp_img_{idx}.jpg"
                 with open(img_path, "wb") as handler:
                     handler.write(img_data)
-                pdf.image(img_path, w=60)
+                # Вставляем изображение с ограниченной шириной
+                try:
+                    pdf.image(img_path, w=60)
+                except Exception:
+                    # fallback: если изображение не подходит, пропускаем
+                    pass
                 os.remove(img_path)
                 pdf.ln(5)
             except Exception as e:
@@ -677,20 +739,20 @@ async def create_catalog_pdf(properties, pdf_path):
 
         # Остальной текст
         pdf.set_font("DejaVu", size=11)
-        pdf.cell(0, 8, text=f"Район: {oneline(prop['district'])}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.cell(0, 8, text=f"Статус: {oneline(prop['status'])}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.cell(0, 8, text=f"Застройщик: {oneline(prop['developer'])}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.cell(0, 8, text=f"Срок сдачи: {oneline(prop['enddate'])}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        prices = prop['prices']
+        pdf.cell(0, 8, text=f"Район: {oneline(prop.get('district','Не указано'))}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(0, 8, text=f"Статус: {oneline(prop.get('status','Не указано'))}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(0, 8, text=f"Застройщик: {oneline(prop.get('developer','Не указано'))}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(0, 8, text=f"Срок сдачи: {oneline(prop.get('enddate','Не указано'))}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        prices = prop.get('prices', {})
         pdf.cell(0, 8, text=f"Цены:", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.cell(0, 8, text=f"   - Студия: от {format_price(prices['studio'])} THB", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.cell(0, 8, text=f"   - 1BR: от {format_price(prices['1br'])} THB", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.cell(0, 8, text=f"   - 2BR: от {format_price(prices['2br'])} THB", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.cell(0, 8, text=f"   - 3BR: от {format_price(prices['3br'])} THB", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.cell(0, 8, text=f"   - Пентхаус: от {format_price(prices['penthouse'])} THB", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        # pdf.cell(0, 8, text=f"Условия оплаты: {oneline(prop['payments'])}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        # Используем multi_cell для описания, чтобы поддерживать переносы строк
-        comments = str(prop['comments']).replace('\r\n', '\n').replace('\r', '\n')
+        pdf.cell(0, 8, text=f"   - Студия: от {format_price(prices.get('studio'))} THB", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(0, 8, text=f"   - 1BR: от {format_price(prices.get('1br'))} THB", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(0, 8, text=f"   - 2BR: от {format_price(prices.get('2br'))} THB", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(0, 8, text=f"   - 3BR: от {format_price(prices.get('3br'))} THB", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(0, 8, text=f"   - Пентхаус: от {format_price(prices.get('penthouse'))} THB", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(0, 8, text=f"Условия оплаты: {oneline(prop.get('payments','Не указано'))}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        # Описание
+        comments = str(prop.get('comments','')).replace('\r\n', '\n').replace('\r', '\n')
         pdf.multi_cell(0, 8, text=f"Описание: {comments}")
         pdf.ln(3)
 
