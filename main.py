@@ -732,15 +732,19 @@ async def create_catalog_pdf(properties, pdf_path):
         pdf.cell(200, 10, text="Каталог объектов PolarProperty", new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
         pdf.ln(10)
 
-        # Название объекта
+        # Название объекта (без ID на той же строке)
         pdf.set_font("DejaVu", 'B', size=12)
         title_line = f"{idx}. {oneline(prop.get('project_name',''))}"
-        if prop.get('extId'):
-            title_line += f"  (ID: {prop['extId']})"
         pdf.cell(0, 10, text=title_line, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.ln(3)
+        # Отдельная строка с ID (меньше и не жирная)
+        if prop.get('extId'):
+            pdf.set_font("DejaVu", '', size=9)
+            pdf.cell(0, 6, text=f"ID: {oneline(prop['extId'])}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.ln(1)
+        else:
+            pdf.ln(3)
 
-        # Фото объекта (сразу после названия)
+        # Фото
         if prop.get("photo_url"):
             import requests
             try:
@@ -748,11 +752,9 @@ async def create_catalog_pdf(properties, pdf_path):
                 img_path = f"temp_img_{idx}.jpg"
                 with open(img_path, "wb") as handler:
                     handler.write(img_data)
-                # Вставляем изображение с ограниченной шириной
                 try:
                     pdf.image(img_path, w=60)
                 except Exception:
-                    # fallback: если изображение не подходит, пропускаем
                     pass
                 os.remove(img_path)
                 pdf.ln(5)
@@ -760,7 +762,6 @@ async def create_catalog_pdf(properties, pdf_path):
                 print(f"⚠️ Не удалось добавить изображение в PDF: {e}")
                 pdf.ln(5)
 
-        # Остальной текст
         pdf.set_font("DejaVu", size=11)
         pdf.cell(0, 8, text=f"Район: {oneline(prop.get('district','Не указано'))}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.cell(0, 8, text=f"Статус: {oneline(prop.get('status','Не указано'))}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
