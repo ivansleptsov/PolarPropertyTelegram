@@ -44,6 +44,104 @@ user_state = {}
 
 PAGE_SIZE = 5  # Количество объектов на страницу
 
+# --- Конфигурация извлечения внешнего ID ---
+CANDIDATE_EXT_ID_KEYS = [
+    'id','ID','Id','№','No','Номер','Номер объекта','ID объекта','Id объекта','Id Объекта',
+    'ID обьекта','Id обьекта','Object ID','ObjectId','External ID','External Id'
+]
+
+def format_notion_property(pv: dict) -> str:
+    """Единообразно форматирует значение свойства Notion согласно типу.
+    Поддержка: title, rich_text, select, multi_select, number, url, email, phone_number,
+    unique_id, formula, rollup, date. Не генерирует новые значения.
+    """
+    if not pv or not isinstance(pv, dict):
+        return ''
+    ptype = pv.get('type')
+    try:
+        if ptype == 'title':
+            return ''.join([(t.get('plain_text') or t.get('text', {}).get('content','') or '') for t in pv.get('title', [])]).strip()
+        if ptype == 'rich_text':
+            return ''.join([(t.get('plain_text') or t.get('text', {}).get('content','') or '') for t in pv.get('rich_text', [])]).strip()
+        if ptype == 'select':
+            return (pv.get('select') or {}).get('name','') or ''
+        if ptype == 'multi_select':
+            return ', '.join([o.get('name','') for o in pv.get('multi_select', []) if o.get('name')]).strip()
+        if ptype == 'number':
+            return '' if pv.get('number') is None else str(pv.get('number'))
+        if ptype in ('url','email','phone_number'):
+            return pv.get(ptype) or ''
+        if ptype == 'unique_id':
+            u = pv.get('unique_id') or {}
+            num = u.get('number')
+            if num is None:
+                return ''
+            prefix = u.get('prefix') or ''
+            return f"{prefix}-{num}" if prefix else str(num)
+        if ptype == 'formula':
+            f = pv.get('formula') or {}
+            ftype = f.get('type')
+            if ftype == 'string':
+                return f.get('string') or ''
+            if ftype == 'number':
+                return '' if f.get('number') is None else str(f.get('number'))
+            if ftype == 'boolean':
+                return '' if f.get('boolean') is None else ('true' if f.get('boolean') else 'false')
+            if ftype == 'date':
+                d = f.get('date') or {}
+                return d.get('start') or ''
+            return ''
+        if ptype == 'rollup':
+            r = pv.get('rollup') or {}
+            rtype = r.get('type')
+            if rtype == 'number':
+                return '' if r.get('number') is None else str(r.get('number'))
+            if rtype == 'date':
+                d = r.get('date') or {}
+                return d.get('start') or ''
+            if rtype == 'array':
+                parts = []
+                for inner in r.get('array', []):
+                    parts.append(format_notion_property(inner))
+                return ', '.join([p for p in parts if p.strip()]).strip()
+            return ''
+        if ptype == 'date':
+            d = pv.get('date') or {}
+            return d.get('start') or ''
+        # fallback попытка plain_text
+        inner = pv.get(ptype)
+        if isinstance(inner, dict):
+            if isinstance(inner.get('plain_text'), str):
+                return inner.get('plain_text')
+            if inner.get('text') and isinstance(inner.get('text'), dict):
+                return inner.get('text', {}).get('content','') or ''
+        return ''
+    except Exception:
+        return ''
+
+def extract_external_id(page_properties: dict) -> str:
+    """Извлекает внешний extId только если он реально присутствует в одном из кандидатных полей.
+    Алгоритм: прямой проход -> lowercase fallback. Возвращает '' если не найдено.
+    """
+    if not page_properties or not isinstance(page_properties, dict):
+        return ''
+    lower_map = {k.lower(): k for k in page_properties.keys()}
+
+    # Прямой проход
+    for cand in CANDIDATE_EXT_ID_KEYS:
+        if cand in page_properties:
+            val = format_notion_property(page_properties[cand]).strip()
+            if val:
+                return val
+    # Fallback через lower_map
+    for cand in CANDIDATE_EXT_ID_KEYS:
+        key = lower_map.get(cand.lower())
+        if key:
+            val = format_notion_property(page_properties[key]).strip()
+            if val:
+                return val
+    return ''
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Главное меню"""
     photo_url = "https://drive.google.com/uc?export=view&id=1yiRRSf7Ni8sB_nVm4DqRUNCHdDmQSKFm"
@@ -95,108 +193,71 @@ async def is_user_subscribed(user_id, context):
         return False
 
 async def get_properties():
-    """Получение объектов из Notion с улучшенной обработкой ошибок
-    Возвращает список dict с ключами: project_name, status, district, prices, developer,
-    enddate, payments, comments, photo_url, id
-    """
+    """Получает объекты из Notion и извлекает внешний extId. Не генерирует ID искусственно."""
     try:
         response = notion.databases.query(database_id=NOTION_DATABASE_OBJECTS_ID)
         results = response.get("results", [])
-
         if not results:
             print("⚠️ База данных пуста")
             return None
-
         properties = []
         for item in results:
             try:
-                props = item.get("properties", {})
-
-                # Название проекта (адаптируйте имена полей при необходимости)
-                project_name = props.get("Название проекта", {}).get("title", [{}])[0].get("text", {}).get("content", "Без названия")
-                # Статус и район
-                status = props.get("Статус", {}).get("select", {}).get("name", "Не указано")
-                district = props.get("Район", {}).get("select", {}).get("name", "Не указано")
-
-                # Застройщик / rich_text
-                developer_rich = props.get("Застройщик", {}).get("rich_text", [])
-                developer = "".join([t.get("text", {}).get("content", "") for t in developer_rich]) if developer_rich else "Не указано"
-
-                # Срок сдачи
-                enddate = props.get("Срок сдачи", {}).get("number", "Не указано")
-
-                # Условия оплаты — вычисляем по статусу: если объект сдан -> "по запросу", иначе "рассрочка до конца строительства"
-                status_lower = (status or "").lower()
-                if any(k in status_lower for k in ("сдан", "сдача", "готово", "completed", "ready")):
-                    payments = "по запросу"
+                props = item.get('properties', {})
+                # Основное имя проекта
+                title_prop = props.get('Название проекта') or props.get('Название') or props.get('Title')
+                project_name = format_notion_property(title_prop) or 'Без названия'
+                status = (props.get('Статус', {}) or {}).get('select', {}).get('name', 'Не указано')
+                district = (props.get('Район', {}) or {}).get('select', {}).get('name', 'Не указано')
+                developer = ''.join([t.get('text', {}).get('content','') for t in (props.get('Застройщик', {}) or {}).get('rich_text', [])]) or 'Не указано'
+                enddate = (props.get('Срок сдачи', {}) or {}).get('number', 'Не указано')
+                status_lower = (status or '').lower()
+                if any(k in status_lower for k in ("сдан","сдача","готово","completed","ready")):
+                    payments = 'по запросу'
                 else:
-                    payments = "рассрочка до конца строительства"
-
-                # Описание
-                comments_rich = props.get("Описание", {}).get("rich_text", [])
-                comments = "".join([t.get("text", {}).get("content", "") for t in comments_rich]) if comments_rich else "Не указано"
-
-                # Цены
+                    payments = 'рассрочка до конца строительства'
+                comments = ''.join([t.get('text', {}).get('content','') for t in (props.get('Описание', {}) or {}).get('rich_text', [])]) or 'Не указано'
                 prices = {
-                    "studio": props.get("Студия (THB)", {}).get("number"),
-                    "1br": props.get("1BR (THB)", {}).get("number"),
-                    "2br": props.get("2BR (THB)", {}).get("number"),
-                    "3br": props.get("3BR (THB)", {}).get("number"),
-                    "penthouse": props.get("Пентхаус (THB)", {}).get("number")
+                    'studio': (props.get('Студия (THB)', {}) or {}).get('number'),
+                    '1br': (props.get('1BR (THB)', {}) or {}).get('number'),
+                    '2br': (props.get('2BR (THB)', {}) or {}).get('number'),
+                    '3br': (props.get('3BR (THB)', {}) or {}).get('number'),
+                    'penthouse': (props.get('Пентхаус (THB)', {}) or {}).get('number')
                 }
-
-                # Фото (file / external)
                 photo_url = None
-                photo_field = props.get("Фото", {}).get("files", [])
+                photo_field = (props.get('Фото', {}) or {}).get('files', [])
                 if photo_field:
-                    if "file" in photo_field[0]:
-                        photo_url = fix_drive_url(photo_field[0]["file"].get("url"))
-                    elif "external" in photo_field[0]:
-                        photo_url = fix_drive_url(photo_field[0]["external"].get("url"))
-
-                # Уникальный ID из колонки "ID" (может быть title/rich_text/number)
-                unique_id = ""
-                id_field = props.get("ID") or props.get("Id") or props.get("id")
-                if id_field:
-                    # try different types
-                    if isinstance(id_field.get("number"), (int, float)):
-                        unique_id = str(id_field.get("number"))
-                    elif id_field.get("type") == "title":
-                        unique_id = id_field.get("title", [{}])[0].get("text", {}).get("content", "")
-                    elif id_field.get("type") == "rich_text":
-                        unique_id = "".join([t.get("text", {}).get("content", "") for t in id_field.get("rich_text", [])])
-                    else:
-                        # fallback: try common keys
-                        for k in ("plain_text", "text", "content"):
-                            v = id_field.get(k)
-                            if v:
-                                unique_id = v
-                                break
-
+                    if 'file' in photo_field[0]:
+                        photo_url = fix_drive_url(photo_field[0]['file'].get('url'))
+                    elif 'external' in photo_field[0]:
+                        photo_url = fix_drive_url(photo_field[0]['external'].get('url'))
+                ext_id = extract_external_id(props)
+                if ext_id:
+                    print("Parsed extId", item.get('id'), project_name, ext_id)
+                else:
+                    print("ID not found", item.get('id'), list(props.keys()))
                 properties.append({
-                    "project_name": project_name,
-                    "status": status,
-                    "district": district,
-                    "prices": prices,
-                    "developer": developer,
-                    "enddate": enddate,
-                    "payments": payments,
-                    "comments": comments,
-                    "photo_url": photo_url,
-                    "id": unique_id,
-                    "raw": item
+                    'project_name': project_name,
+                    'status': status,
+                    'district': district,
+                    'prices': prices,
+                    'developer': developer,
+                    'enddate': enddate,
+                    'payments': payments,
+                    'comments': comments,
+                    'photo_url': photo_url,
+                    'extId': ext_id,
+                    'page_id': item.get('id'),
+                    'raw': item
                 })
-
             except Exception as e:
                 print(f"⚠️ Ошибка обработки объекта: {e}")
                 continue
-
         return properties
-
     except Exception as e:
         print(f"❌ Критическая ошибка при запросе к Notion: {e}")
         return None
-        
+
 async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     # Ответ на callback: безопасно игнорируем устаревшие/недействительные callback'ы
@@ -204,7 +265,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer()
     except BadRequest as e:
         err = str(e)
-        if "Query is too old" in err or "query id is invalid" in err or "response timeout" in err:
+        if any(x in err for x in ("Query is too old","query id is invalid","response timeout")):
             print(f"⚠️ Callback expired or invalid: {e}")
         else:
             raise
@@ -216,11 +277,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("📩 Подбор квартиры", callback_data="selection")],
             [InlineKeyboardButton("🔙 Назад в меню", callback_data="menu")]
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.message.reply_text(
-            "🏠 Покупка недвижимости\n\nВыберите, что вас интересует 👇",
-            reply_markup=reply_markup
-        )
+        await query.message.reply_text("🏠 Покупка недвижимости\n\nВыберите, что вас интересует 👇", reply_markup=InlineKeyboardMarkup(keyboard))
         return
 
     elif query.data == "rent_menu":
@@ -335,9 +392,9 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"🏗 Статус: {escape_html(prop['status'])}\n"
                     f"📅 Срок сдачи: {escape_html(prop['enddate'])}"
                 )
-                reply_markup = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🔎 Подробнее", callback_data=f"object_{idx}")],
-                ])
+                if prop.get('extId'):
+                    short_text += f"\n🔖 ID: {escape_html(prop['extId'])}"
+                reply_markup = InlineKeyboardMarkup([[InlineKeyboardButton("🔎 Подробнее", callback_data=f"object_{idx}")]])
                 if prop.get("photo_url"):
                     await query.message.reply_photo(
                         photo=prop["photo_url"],
@@ -353,14 +410,12 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
 
             # Кнопки пагинации
-            nav_buttons = []
-            nav_buttons.append(InlineKeyboardButton("🔙 Назад в меню", callback_data="menu"))
+            nav_buttons = [InlineKeyboardButton("🔙 Назад в меню", callback_data="menu")]
             if end < total:
                 nav_buttons.append(InlineKeyboardButton("➡️ Следующие", callback_data=f"catalog_{end}"))
-            reply_markup = InlineKeyboardMarkup([nav_buttons])
             await query.message.reply_text(
                 f"Показаны объекты {page+1}-{end} из {total}.",
-                reply_markup=reply_markup
+                reply_markup=InlineKeyboardMarkup([nav_buttons])
             )
         else:
             keyboard = [
@@ -368,11 +423,10 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("✅ Проверить подписку", callback_data="catalog_0")],
                 [InlineKeyboardButton("🔙 Назад в меню", callback_data="menu")]
             ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
             await query.message.reply_text(
                 f"❗️ Для получения каталога подпишитесь на наш канал: {CHANNEL_USERNAME}\n\n"
                 "После подписки нажмите 'Проверить подписку'",
-                reply_markup=reply_markup
+                reply_markup=InlineKeyboardMarkup(keyboard)
             )
             return
     # Добавьте обработку object_{idx} для подробной карточки
@@ -390,13 +444,17 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🏗 Статус: {escape_html(prop['status'])}\n"
             f"🏢 Застройщик: {escape_html(prop['developer'])}\n"
             f"📅 Срок сдачи: {escape_html(prop['enddate'])}\n"
+        )
+        if prop.get('extId'):
+            detail_text += f"🔖 ID: {escape_html(prop['extId'])}\n"
+        detail_text += (
             f"💰 Цены:\n"
             f"   - Студия: от {escape_html(format_price(prices['studio']))} THB\n"
             f"   - 1BR: от {escape_html(format_price(prices['1br']))} THB\n"
             f"   - 2BR: от {escape_html(format_price(prices['2br']))} THB\n"
             f"   - 3BR: от {escape_html(format_price(prices['3br']))} THB\n"
             f"   - Пентхаус: от {escape_html(format_price(prices['penthouse']))} THB\n"
-            f"💳 Условия оплаты: {escape_html(prop.get('payments', 'Не указано'))}\n"
+            f"💳 Условия оплаты: {escape_html(prop.get('payments','Не указано'))}\n"
             f"📝 Описание: {escape_html(prop['comments'])}\n"
         )
         reply_markup = InlineKeyboardMarkup([
@@ -435,7 +493,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"👤 Пользователь: {user_name} (@{username})\n"
                 f"🆔 ID: {user_id}\n"
                 f"🏠 Объект: {prop.get('project_name')}\n"
-                f"🔖 ID объекта: {get_visible_object_id(prop) or '(не указан)'}\n"
+                f"🔖 ID объекта: {prop.get('extId') or '(не указан)'}\n"
             )
             if ADMIN_IDS:
                 for admin_id in ADMIN_IDS:
@@ -463,11 +521,10 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("✅ Проверить подписку", callback_data="download_pdf")],
                 [InlineKeyboardButton("🔙 Назад в меню", callback_data="menu")]
             ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
             await query.message.reply_text(
                 f"❗️ Для скачивания каталога подпишитесь на наш канал: {CHANNEL_USERNAME}\n\n"
                 "После подписки нажмите 'Проверить подписку'",
-                reply_markup=reply_markup
+                reply_markup=InlineKeyboardMarkup(keyboard)
             )
             return
 
@@ -596,126 +653,25 @@ def escape_html(text):
     """Экранирует спецсимволы для HTML"""
     return html.escape(str(text))
 
-def _extract_notion_field_value(field):
-    """Надёжно извлекает текстовое значение из поля Notion (title, rich_text, select, number, formula, fallback)."""
-    if not field:
-        return ""
-    # formula (строковый / числовой результат формулы)
-    if field.get("type") == "formula":
-        f = field.get("formula", {})
-        if f.get("type") == "string":
-            return f.get("string") or ""
-        if f.get("type") == "number":
-            n = f.get("number")
-            return "" if n is None else str(n)
-        if f.get("type") == "boolean":
-            return str(f.get("boolean"))
-        return ""
-    # title array
-    if field.get("title"):
-        texts = []
-        for it in field.get("title", []):
-            if isinstance(it, dict):
-                texts.append(it.get("plain_text") or it.get("text", {}).get("content", ""))
-        return "".join(texts).strip()
-    # rich_text array
-    if field.get("rich_text"):
-        texts = []
-        for it in field.get("rich_text", []):
-            if isinstance(it, dict):
-                texts.append(it.get("plain_text") or it.get("text", {}).get("content", ""))
-        return "".join(texts).strip()
-    # select
-    if field.get("select"):
-        return field.get("select", {}).get("name", "") or ""
-    # number
-    if isinstance(field.get("number"), (int, float)):
-        return str(field.get("number"))
-    # fallback keys
-    for k in ("plain_text", "text", "content", "string"):
-        v = field.get(k)
-        if v:
-            return v
-    return ""
-
-
-def get_visible_object_id(prop):
-    """Ищет видимый в таблице Notion ID (например SALE-13). Предпочитает formula с шаблоном, игнорирует page-UUID."""
-    uuid_re = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
-    pattern_re = re.compile(r"^[A-ZА-Я]+-\d+$")  # SALE-26, ПРОДАЖА-5 и т.п.
-
-    raw_prop_id = (prop or {}).get("id")
-    if raw_prop_id:
-        s = str(raw_prop_id).strip()
-        if s and not uuid_re.match(s) and pattern_re.match(s):
-            return s
-
-    raw = (prop.get("raw", {}) if prop else {}) or {}
-    raw_props = raw.get("properties", {}) or {}
-
-    # 1) сначала ищем formula со строковым значением подходящего шаблона
-    for key, val in raw_props.items():
-        if val.get("type") == "formula":
-            f = val.get("formula", {})
-            if f.get("type") == "string":
-                sval = (f.get("string") or "").strip()
-                if sval and pattern_re.match(sval):
-                    return sval
-
-    # 2) формируем приоритетные ключи
-    preferred = []
-    for key in raw_props.keys():
-        kn = key.replace(" ", "").lower()
-        if "id" in kn or key.strip().startswith("№") or key.strip().lower().startswith("no"):
-            preferred.append(key)
-
-    tried = set()
-    for key in preferred + list(raw_props.keys()):
-        if key in tried:
-            continue
-        tried.add(key)
-        try:
-            val = _extract_notion_field_value(raw_props.get(key))
-        except Exception:
-            val = ""
-        if val:
-            sval = val.strip()
-            if sval and not uuid_re.match(sval):
-                # если удовлетворяет шаблону вида XXX-число, сразу берём
-                if pattern_re.match(sval):
-                    return sval
-                # иначе запоминаем как возможный (может быть просто число) — вернём если ничего лучше
-                fallback_val = sval
-                return fallback_val
-
-    page_id = raw.get("id")
-    if page_id:
-        return str(page_id)
-    return ""
-
-
 async def add_request_to_notion(user_name, username, user_id, prop):
     """Добавляет заявку в таблицу Notion. Использует видимый ID объекта (SALE-1 и т.п.) если он есть."""
     from datetime import datetime
     try:
-        id_value = get_visible_object_id(prop) or ""
-
-        print(f"📥 Добавление заявки: object_id='{id_value}', project='{prop.get('project_name')}'")
-
+        ext_id = prop.get('extId') or ''
         notion.pages.create(
             parent={"database_id": NOTION_DATABASE_REQUESTS_ID},
             properties={
                 "Пользователь": {"title": [{"text": {"content": user_name}}]},
                 "Username": {"rich_text": [{"text": {"content": username}}]},
                 "UserID": {"rich_text": [{"text": {"content": str(user_id)}}]},
-                "Объект": {"rich_text": [{"text": {"content": prop.get('project_name', '')}}]},
-                "ID объекта": {"rich_text": [{"text": {"content": str(id_value)}}]},
+                "Объект": {"rich_text": [{"text": {"content": prop.get('project_name','')}}]},
+                "ID объекта": {"rich_text": [{"text": {"content": ext_id}}]},
                 "Источник": {"rich_text": [{"text": {"content": "телеграм бот"}}]},
                 "Тип сделки": {"rich_text": [{"text": {"content": "Продажа"}}]},
                 "Дата": {"date": {"start": datetime.now().isoformat()}}
             }
         )
-        print("✅ Заявка добавлена в Notion")
+        print(f"✅ Заявка добавлена в Notion (extId='{ext_id}')")
     except Exception as e:
         print(f"❌ Ошибка добавления заявки в Notion: {e}")
 
@@ -773,7 +729,10 @@ async def create_catalog_pdf(properties, pdf_path):
 
         # Название объекта
         pdf.set_font("DejaVu", 'B', size=12)
-        pdf.cell(0, 10, text=f"{idx}. {oneline(prop.get('project_name',''))}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        title_line = f"{idx}. {oneline(prop.get('project_name',''))}"
+        if prop.get('extId'):
+            title_line += f"  (ID: {prop['extId']})"
+        pdf.cell(0, 10, text=title_line, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(3)
 
         # Фото объекта (сразу после названия)
@@ -834,19 +793,19 @@ async def add_selection_to_notion(user_name, username, user_id, data):
                     "rich_text": [{"text": {"content": str(user_id)}}]
                 },
                 "Имя": {
-                    "rich_text": [{"text": {"content": data.get("name", "")}}]
+                    "rich_text": [{"text": {"content": data.get('name','')}}]
                 },
                 "Телефон": {
-                    "rich_text": [{"text": {"content": data.get("phone", "")}}]
+                    "rich_text": [{"text": {"content": data.get('phone','')}}]
                 },
                 "Тип недвижимости": {
-                    "rich_text": [{"text": {"content": data.get("type", "")}}]
+                    "rich_text": [{"text": {"content": data.get('type','')}}]
                 },
                 "Район/город": {
-                    "rich_text": [{"text": {"content": data.get("location", "")}}]
+                    "rich_text": [{"text": {"content": data.get('location','')}}]
                 },
                 "Бюджет": {
-                    "rich_text": [{"text": {"content": data.get("budget", "")}}]
+                    "rich_text": [{"text": {"content": data.get('budget','')}}]
                 },
                 "Дата": {
                     "date": {"start": datetime.now().isoformat()}
