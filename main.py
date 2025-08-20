@@ -97,68 +97,50 @@ async def is_user_subscribed(user_id, context):
 async def get_properties():
     """Получение объектов из Notion с улучшенной обработкой ошибок"""
     try:
-        response = notion.databases.query(
-            database_id=NOTION_DATABASE_OBJECTS_ID
-        )
-        results = response.get("results", [])
-        
-        if not results:
-            print("⚠️ База данных пуста")
+        results = notion.databases.query(database_id=NOTION_DATABASE_OBJECTS_ID).get("results", [])
+        properties = []
+
+        def _get_text(prop):
+            if not prop:
+                return None
+            t = prop.get("type")
+            if t == "title":
+                return "".join([x.get("plain_text", "") for x in prop.get("title", [])]).strip() or None
+            if t == "rich_text":
+                return "".join([x.get("plain_text", "") for x in prop.get("rich_text", [])]).strip() or None
+            if t == "number":
+                return prop.get("number")
+            # fallback: try plain_text if available
+            if isinstance(prop, dict):
+                for k in ("plain_text", "text", "content"):
+                    v = prop.get(k)
+                    if v:
+                        return v
             return None
 
-        properties = []
         for item in results:
-            try:
-                props = item["properties"]
-                
-                # Основные поля
-                project_name = props.get("Название проекта", {}).get("title", [{}])[0].get("text", {}).get("content", "Без названия")
-                status = props.get("Статус", {}).get("select", {}).get("name", "Не указано")
-                district = props.get("Район", {}).get("select", {}).get("name", "Не указано")
-                developer_rich = props.get("Застройщик", {}).get("rich_text", [])
-                developer = "".join([t.get("text", {}).get("content", "") for t in developer_rich]) if developer_rich else "Не указано"
-                enddate = props.get("Срок сдачи", {}).get("number", "Не указано")
-                payments_rich = props.get("Условия оплаты", {}).get("rich_text", [])
-                payments = "".join([t.get("text", {}).get("content", "") for t in payments_rich]) if payments_rich else "Не указано"
-                comments_rich = props.get("Описание", {}).get("rich_text", [])
-                comments = "".join([t.get("text", {}).get("content", "") for t in comments_rich]) if comments_rich else "Не указано"
-                # Обработка цен
-                prices = {
-                    "studio": props.get("Студия (THB)", {}).get("number"),
-                    "1br": props.get("1BR (THB)", {}).get("number"),
-                    "2br": props.get("2BR (THB)", {}).get("number"),
-                    "3br": props.get("3BR (THB)", {}).get("number"),
-                    "penthouse": props.get("Пентхаус (THB)", {}).get("number")
-                }
-                
-                photo_url = None
-                photo_field = props.get("Фото", {}).get("files", [])
-                if photo_field:
-                    # Если это файл, берем ссылку на файл
-                    if "file" in photo_field[0]:
-                        photo_url = fix_drive_url(photo_field[0]["file"].get("url"))
-                    # Если это внешняя ссылка
-                    elif "external" in photo_field[0]:
-                        photo_url = fix_drive_url(photo_field[0]["external"].get("url"))
-                
-                properties.append({
-                    "project_name": project_name,
-                    "status": status,
-                    "district": district,
-                    "prices": prices,
-                    "developer": developer,
-                    "enddate": enddate,
-                    "payments": payments,
-                    "comments": comments,
-                    "photo_url": photo_url  
-                })
-                
-            except Exception as e:
-                print(f"⚠️ Ошибка обработки объекта: {e}")
-                continue
-                
+            props = item.get("properties", {})
+
+            # Попытка получить название проекта (адаптируйте имена полей под вашу базу)
+            project_name = _get_text(props.get("Название")) or _get_text(props.get("Name")) or _get_text(props.get("Project"))
+
+            # Извлечение уникального ID из столбца "ID"
+            unique_id = _get_text(props.get("ID"))
+
+            # Другие поля (пример — можно расширять)
+            price = None
+            if props.get("Цена"):
+                price = props["Цена"].get("number") if props["Цена"].get("type") == "number" else _get_text(props.get("Цена"))
+
+            properties.append({
+                "project_name": project_name or "Без названия",
+                "id": unique_id,
+                "price": price,
+                "raw": item
+            })
+
         return properties
-        
+
     except Exception as e:
         print(f"❌ Критическая ошибка при запросе к Notion: {e}")
         return None
@@ -252,7 +234,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     elif query.data == "about":
-        about_photo = "https://drive.google.com/uc?export=view&id=1EssKkt-rLdIU8pIOzIV6-W7V_RmoF46v"
+        about_photo = "https://drive.google.com/uc?export=view&id=120dGw098edD-hVUClSX68VtTaaYODQng"
         contact_text = (
             "🏢 PolarProperty Asia — официальный представитель ведущих застройщиков Таиланда.\n"  
             "✅ Работаем без комиссии для покупателя\n"
@@ -354,7 +336,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"   - 2BR: от {escape_html(format_price(prices['2br']))} THB\n"
             f"   - 3BR: от {escape_html(format_price(prices['3br']))} THB\n"
             f"   - Пентхаус: от {escape_html(format_price(prices['penthouse']))} THB\n"
-            f"💳 Условия оплаты: {escape_html(prop['payments'])}\n"
+            f"💳 Условия оплаты: По запросу\n" #{escape_html(prop['payments'])}
             f"📝 Описание: {escape_html(prop['comments'])}\n"
         )
         reply_markup = InlineKeyboardMarkup([
@@ -468,7 +450,8 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.callback_query.message.delete()
             await start(update, context)
         except BadRequest:
-            await query.message.reply_text("🏠 Главное меню\n\nВыберите действие:")
+            # await query.message.reply_text("🏠 Главное меню\n\nВыберите действие:")
+            await query.message.reply_text("Для выхода в главное меню напишите /start:")
         return
    
 async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -555,7 +538,16 @@ async def add_request_to_notion(user_name, username, user_id, prop):
                     "rich_text": [{"text": {"content": str(user_id)}}]
                 },
                 "Объект": {
-                    "rich_text": [{"text": {"content": prop['project_name']}}]
+                    "rich_text": [{"text": {"content": prop.get('project_name', '')}}]
+                },
+                "ID объекта": {
+                    "rich_text": [{"text": {"content": str(prop.get('id', ''))}}]
+                },
+                "Источник": {
+                    "rich_text": [{"text": {"content": "телеграм бот"}}]
+                },
+                "Тип сделки": {
+                    "rich_text": [{"text": {"content": "Продажа"}}]
                 },
                 "Дата": {
                     "date": {"start": datetime.now().isoformat()}
@@ -647,7 +639,7 @@ async def create_catalog_pdf(properties, pdf_path):
         pdf.cell(0, 8, text=f"   - 2BR: от {format_price(prices['2br'])} THB", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.cell(0, 8, text=f"   - 3BR: от {format_price(prices['3br'])} THB", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.cell(0, 8, text=f"   - Пентхаус: от {format_price(prices['penthouse'])} THB", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.cell(0, 8, text=f"Условия оплаты: {oneline(prop['payments'])}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        # pdf.cell(0, 8, text=f"Условия оплаты: {oneline(prop['payments'])}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         # Используем multi_cell для описания, чтобы поддерживать переносы строк
         comments = str(prop['comments']).replace('\r\n', '\n').replace('\r', '\n')
         pdf.multi_cell(0, 8, text=f"Описание: {comments}")
