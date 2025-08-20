@@ -775,9 +775,15 @@ async def create_catalog_pdf(properties, pdf_path):
         pdf.cell(0, 8, text=f"   - 3BR: от {format_price(prices.get('3br'))} THB", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.cell(0, 8, text=f"   - Пентхаус: от {format_price(prices.get('penthouse'))} THB", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.cell(0, 8, text=f"Условия оплаты: {oneline(prop.get('payments','Не указано'))}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        # Описание
+        # Отступ между условиями оплаты и описанием
+        pdf.ln(4)
         comments = str(prop.get('comments','')).replace('\r\n', '\n').replace('\r', '\n')
         pdf.multi_cell(0, 8, text=f"Описание: {comments}")
+        # Финальная контактная строка
+        pdf.ln(2)
+        pdf.set_font("DejaVu", '', size=10)
+        pdf.multi_cell(0, 6, text="Запросите подробности у менеджеров Polar Property")
+        pdf.set_font("DejaVu", size=11)
         pdf.ln(3)
 
     pdf.output(pdf_path)
