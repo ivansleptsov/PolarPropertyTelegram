@@ -149,7 +149,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         " Добро пожаловать в PolarProperty Asia! \n\n"
         "🏝 Мы помогаем купить или арендовать недвижимость в Паттайе и по всему Таиланду.\n\n"
         "💎 Только проверенные объекты и официальные цены от застройщиков.  \n\n"
-        "💬 Подбор — бесплатно.\n\n"
+        "💬 Консультация — бесплатно.\n\n"
         "Выберите, что вас интересует 👇"
     )
     keyboard = [
@@ -274,7 +274,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [
             [InlineKeyboardButton("📂 Список объектов", callback_data="catalog")],
             [InlineKeyboardButton("📥 Скачать каталог PDF", callback_data="download_pdf")],
-            [InlineKeyboardButton("📩 Подбор квартиры", callback_data="selection")],
+            [InlineKeyboardButton("📩 Получить консультацию", callback_data="selection")],
             [InlineKeyboardButton("🔙 Назад в меню", callback_data="menu")]
         ]
         await query.message.reply_text("🏠 Покупка недвижимости\n\nВыберите, что вас интересует 👇", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -288,11 +288,17 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "👋 По всем вопросам по поводу аренды напишите нашим менеджерам:\n\n"
             "👩‍💼 Любовь\n"
             f"✈️  Tg: @lyubov_danilove\n"
-            f"🇷🇺 <a href=\"https://wa.me/79644229573?text={wa_msg_encoded}\">+7 964 422 95 73 (WhatsApp)</a>\n"
-            f"🇹🇭  <a href=\"https://wa.me/66968300106?text={wa_msg_encoded}\">+66 96 830 01 06 (WhatsApp)</a>\n\n"
+            f"🇷🇺 <a href=\"https://wa.me/79644229573\">+7 964 422 95 73 (WhatsApp)</a>\n"
+            f"🇹🇭  <a href=\"https://wa.me/66968300106\">+66 96 830 01 06 (WhatsApp)</a>\n\n"
+            "👨‍💼 Павел\n"
+            f"✈️  Tg: @Pash_Danilov\n"
+            f"🇹🇭  <a href=\"https://wa.me/66838089908\">+66 83 808 9908 (WhatsApp)</a>\n\n"
             "👩‍💼 Надежда \n"
             f"✈️  Tg: @mandarinka_nadya\n"
-            f"🇷🇺 <a href=\"https://wa.me/79241713616?text={wa_msg_encoded}\">+7 924 171 36 16 (WhatsApp)</a>\n"
+            f"🇷🇺 <a href=\"https://wa.me/79241713616\">+7 924 171 36 16 (WhatsApp)</a>\n\n"    
+            "👨‍💼 Иван \n"
+            f"✈️  Tg: @Sleptsov_Ivan\n"
+            f"🇷🇺 <a href=\"https://wa.me/79143083827\">+7 914 308 38 27 (WhatsApp)</a>\n"
             
         )
         await query.message.reply_text(
@@ -319,9 +325,15 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"✈️  Tg: @lyubov_danilove\n"
             f"🇷🇺 <a href=\"https://wa.me/79644229573\">+7 964 422 95 73 (WhatsApp)</a>\n"
             f"🇹🇭  <a href=\"https://wa.me/66968300106\">+66 96 830 01 06 (WhatsApp)</a>\n\n"
+            "👨‍💼 Павел\n"
+            f"✈️  Tg: @Pash_Danilov\n"
+            f"🇹🇭  <a href=\"https://wa.me/66838089908\">+66 83 808 9908 (WhatsApp)</a>\n\n"
             "👩‍💼 Надежда \n"
             f"✈️  Tg: @mandarinka_nadya\n"
-            f"🇷🇺 <a href=\"https://wa.me/79241713616\">+7 924 171 36 16 (WhatsApp)</a>\n"            
+            f"🇷🇺 <a href=\"https://wa.me/79241713616\">+7 924 171 36 16 (WhatsApp)</a>\n\n"    
+            "👨‍💼 Иван \n"
+            f"✈️  Tg: @Sleptsov_Ivan\n"
+            f"🇷🇺 <a href=\"https://wa.me/79143083827\">+7 914 308 38 27 (WhatsApp)</a>\n"           
         )
         await query.message.reply_text(
             contact_text,
@@ -579,7 +591,6 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = update.message.from_user.username or "без username"
     state = user_state.get(user_id)
 
-    # --- Интерактивная анкета ---
     if isinstance(state, dict) and state.get("type") == "selection":
         step = state.get("step", 0)
         data = state.get("data", {})
@@ -597,17 +608,14 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_state[user_id] = None
             # Формируем текст для админа
             msg = (
-                "📩 АНКЕТА НА ПОДБОР КВАРТИРЫ\n\n"
+                "📩 Запрос консультации\n\n"
                 f"👤 Пользователь: {user_name} (@{username})\n"
                 f"🆔 ID: {user_id}\n"
                 f"1️⃣ Имя: {data.get('name')}\n"
                 f"2️⃣ Телефон: {data.get('phone')}\n"
-                f"3️⃣ Тип недвижимости: {data.get('type')}\n"
-                f"4️⃣ Район/город: {data.get('location')}\n"
-                f"5️⃣ Бюджет: {data.get('budget')}\n"
             )
             await update.message.reply_text(
-                "✅ Спасибо! Ваша анкета отправлена менеджеру. Мы свяжемся с вами в ближайшее время.",
+                "✅ Мы получили ваш запрос на консультацию. Мы скоро с вами свяжемся.",
                 reply_markup=get_back_button()
             )
             if ADMIN_IDS:
@@ -616,7 +624,6 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         await context.bot.send_message(chat_id=admin_id, text=msg)
                 except Exception as e:
                     print(f"Не удалось отправить анкету админу: {e}")
-            # Добавляем в Notion (новая таблица)
             await add_selection_to_notion(user_name, username, user_id, data)
         return
 
@@ -629,9 +636,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Если пользователь просто пишет текст вне логики бота, даём вежливую подсказку
     try:
         await update.message.reply_text(
-            "Пожалуйста, не отправляйте произвольный текст. "
-            "Используйте меню (кнопки) или напишите /start, чтобы вернуться в главное меню. "
-            "Если хотите связаться с менеджером — нажмите «Чат с менеджером» в меню.",
+            "Пожалуйста, не отправляйте произвольный текст. Используйте меню или /start.",
             reply_markup=get_back_button()
         )
     except Exception as e:
@@ -777,44 +782,23 @@ async def create_catalog_pdf(properties, pdf_path):
     pdf.output(pdf_path)
 # --- Добавьте функцию для добавления анкеты в Notion ---
 async def add_selection_to_notion(user_name, username, user_id, data):
-    """Добавляет анкету на подбор квартиры в таблицу Notion"""
+    """Добавляет запрос консультации (только имя и телефон) в таблицу Notion"""
     from datetime import datetime
     try:
         notion.pages.create(
-            parent={"database_id": NOTION_DATABASE_SELECTIONS_ID},  # замените на ID вашей таблицы анкет
+            parent={"database_id": NOTION_DATABASE_SELECTIONS_ID},
             properties={
-                "Пользователь": {
-                    "title": [{"text": {"content": user_name}}]
-                },
-                "Username": {
-                    "rich_text": [{"text": {"content": username}}]
-                },
-                "UserID": {
-                    "rich_text": [{"text": {"content": str(user_id)}}]
-                },
-                "Имя": {
-                    "rich_text": [{"text": {"content": data.get('name','')}}]
-                },
-                "Телефон": {
-                    "rich_text": [{"text": {"content": data.get('phone','')}}]
-                },
-                "Тип недвижимости": {
-                    "rich_text": [{"text": {"content": data.get('type','')}}]
-                },
-                "Район/город": {
-                    "rich_text": [{"text": {"content": data.get('location','')}}]
-                },
-                "Бюджет": {
-                    "rich_text": [{"text": {"content": data.get('budget','')}}]
-                },
-                "Дата": {
-                    "date": {"start": datetime.now().isoformat()}
-                }
+                "Пользователь": {"title": [{"text": {"content": user_name}}]},
+                "Username": {"rich_text": [{"text": {"content": username}}]},
+                "UserID": {"rich_text": [{"text": {"content": str(user_id)}}]},
+                "Имя": {"rich_text": [{"text": {"content": data.get('name','')}}]},
+                "Телефон": {"rich_text": [{"text": {"content": data.get('phone','')}}]},
+                "Дата": {"date": {"start": datetime.now().isoformat()}}
             }
         )
-        print("✅ Анкета добавлена в Notion")
+        print("✅ Запрос консультации добавлен в Notion")
     except Exception as e:
-        print(f"❌ Ошибка добавления анкеты в Notion: {e}")
+        print(f"❌ Ошибка добавления запроса консультации в Notion: {e}")
 PDF_PATH = "catalog.pdf"
 
 async def scheduled_update_pdf():
@@ -862,17 +846,11 @@ async def on_startup(app):
 # --- Добавьте состояния и вопросы для анкеты ---
 SELECTION_STEPS = [
     "name",
-    "phone",
-    "type",
-    "location",
-    "budget"
+    "phone"
 ]
 SELECTION_QUESTIONS = [
     "1️⃣ Как вас зовут?",
-    "2️⃣ Ваш номер телефона (+ код страны)?",
-    "3️⃣ Тип недвижимости: квартира, дом, вилла?",
-    "4️⃣ Район или город в Таиланде?",
-    "5️⃣ Ваш бюджет?"
+    "2️⃣ Ваш номер телефона (+ код страны)?"
 ]
 
 if __name__ == "__main__":
