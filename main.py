@@ -435,7 +435,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"👤 Пользователь: {user_name} (@{username})\n"
                 f"🆔 ID: {user_id}\n"
                 f"🏠 Объект: {prop.get('project_name')}\n"
-                f"🔖 ID объекта: {prop.get('id', '(не указан)')}\n"
+                f"🔖 ID объекта: {get_visible_object_id(prop) or '(не указан)'}\n"
             )
             if ADMIN_IDS:
                 for admin_id in ADMIN_IDS:
@@ -596,89 +596,88 @@ def escape_html(text):
     """Экранирует спецсимволы для HTML"""
     return html.escape(str(text))
 
+def _extract_notion_field_value(field):
+    """Надёжно извлекает текстовое значение из поля Notion (title, rich_text, select, number, fallback)."""
+    if not field:
+        return ""
+    # title array (Notion new API uses 'title' with 'plain_text' or nested text)
+    if field.get("title"):
+        texts = []
+        for it in field.get("title", []):
+            if isinstance(it, dict):
+                texts.append(it.get("plain_text") or it.get("text", {}).get("content", ""))
+        return "".join(texts).strip()
+    # rich_text array
+    if field.get("rich_text"):
+        texts = []
+        for it in field.get("rich_text", []):
+            if isinstance(it, dict):
+                texts.append(it.get("plain_text") or it.get("text", {}).get("content", ""))
+        return "".join(texts).strip()
+    # select
+    if field.get("select"):
+        return field.get("select", {}).get("name", "") or ""
+    # number
+    if isinstance(field.get("number"), (int, float)):
+        return str(field.get("number"))
+    # fallback keys
+    for k in ("plain_text", "text", "content", "string"):
+        v = field.get(k)
+        if v:
+            return v
+    return ""
+
+
+def get_visible_object_id(prop):
+    """Ищет видимый в таблице Notion ID (например SALE-13). Игнорирует page-UUID."""
+    uuid_re = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+    # 1) если уже есть prop['id'] и это не UUID — используем
+    raw_prop_id = (prop or {}).get("id")
+    if raw_prop_id:
+        s = str(raw_prop_id).strip()
+        if s and not uuid_re.match(s):
+            return s
+
+    raw = (prop.get("raw", {}) if prop else {}) or {}
+    raw_props = raw.get("properties", {}) or {}
+
+    # 2) формируем приоритетные ключи (включая локализованные варианты)
+    preferred = []
+    for key in raw_props.keys():
+        kn = key.replace(" ", "").lower()
+        if "id" in kn or key.strip().startswith("№") or key.strip().lower().startswith("no"):
+            preferred.append(key)
+
+    # 3) затем пробуем preferred, затем все поля
+    tried = set()
+    for key in preferred + list(raw_props.keys()):
+        if key in tried:
+            continue
+        tried.add(key)
+        try:
+            val = _extract_notion_field_value(raw_props.get(key))
+        except Exception:
+            val = ""
+        if val:
+            val = val.strip()
+            # пропускаем UUID-like значения
+            if val and not uuid_re.match(val):
+                return val
+            if uuid_re.match(val):
+                print(f"⚠️ Пропущен UUID в поле '{key}': {val}")
+
+    # 4) fallback — page id (если ничего другого нет)
+    page_id = raw.get("id")
+    if page_id:
+        return str(page_id)
+    return ""
+
+
 async def add_request_to_notion(user_name, username, user_id, prop):
-    """Добавляет заявку в таблицу Notion. Надёжно пытаемся получить видимый в таблице 'ID' (SALE-1 и т.п.)."""
+    """Добавляет заявку в таблицу Notion. Использует видимый ID объекта (SALE-1 и т.п.) если он есть."""
     from datetime import datetime
-    import re
-
     try:
-        id_value = ""
-        # 1) Если get_properties ранее заполнял prop['id'] — используем, но игнорируем page-UUID
-        raw_prop_id = prop.get("id") if prop else None
-        uuid_re = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
-        if raw_prop_id and not uuid_re.match(str(raw_prop_id)):
-            id_value = str(raw_prop_id)
-
-        # 2) Если ещё нет — смотрим в raw.properties: ищем явное поле с именем, содержащим "id"
-        if not id_value:
-            raw = (prop.get("raw", {}) if prop else {}) or {}
-            raw_props = raw.get("properties", {}) or {}
-            candidate_field = None
-            # прямые ключи
-            for key in ("ID", "Id", "id", "ID объекта", "ID_объекта"):
-                if key in raw_props:
-                    candidate_field = raw_props[key]
-                    break
-            # если не нашли — ищем любое свойство, в имени которого есть "id"
-            if not candidate_field:
-                for key, val in raw_props.items():
-                    if "id" in key.replace(" ", "").lower():
-                        candidate_field = val
-                        break
-            # если нашли поле — извлекаем значение по типу
-            if candidate_field:
-                # number
-                if isinstance(candidate_field.get("number"), (int, float)):
-                    id_value = str(candidate_field.get("number"))
-                # select -> name
-                elif candidate_field.get("select"):
-                    id_value = candidate_field.get("select", {}).get("name") or ""
-                # title
-                elif candidate_field.get("title"):
-                    id_value = candidate_field.get("title", [{}])[0].get("text", {}).get("content", "") or ""
-                # rich_text
-                elif candidate_field.get("rich_text"):
-                    id_value = "".join([t.get("text", {}).get("content", "") for t in candidate_field.get("rich_text", [])])
-                # formula / plain text fallback
-                else:
-                    for k in ("plain_text", "text", "content", "string"):
-                        v = candidate_field.get(k)
-                        if v:
-                            id_value = v
-                            break
-
-        # 3) Ещё попытка: иногда нужный ID хранится в другом поле (например 'Код' или 'Code')
-        if not id_value:
-            for alt in ("Код", "Code", "Артикул"):
-                field = raw_props.get(alt)
-                if field:
-                    # используем тот же извлекающий блок
-                    if isinstance(field.get("number"), (int, float)):
-                        id_value = str(field.get("number"))
-                    elif field.get("select"):
-                        id_value = field.get("select", {}).get("name") or ""
-                    elif field.get("title"):
-                        id_value = field.get("title", [{}])[0].get("text", {}).get("content", "") or ""
-                    elif field.get("rich_text"):
-                        id_value = "".join([t.get("text", {}).get("content", "") for t in field.get("rich_text", [])])
-                    else:
-                        for k in ("plain_text", "text", "content", "string"):
-                            v = field.get(k)
-                            if v:
-                                id_value = v
-                                break
-                    if id_value:
-                        break
-
-        # 4) Финальный fallback — если есть page id и ничего другого — сохраняем, но логируем что это page-id
-        if not id_value:
-            page_id = (prop.get("raw", {}) or {}).get("id")
-            if page_id:
-                id_value = str(page_id)
-                print(f"⚠️ Внимание: сохраняется page-UUID как ID объекта (нет явного поля 'ID'): {id_value}")
-
-        if not id_value:
-            id_value = ""
+        id_value = get_visible_object_id(prop) or ""
 
         print(f"📥 Добавление заявки: object_id='{id_value}', project='{prop.get('project_name')}'")
 
