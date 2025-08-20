@@ -779,25 +779,21 @@ async def create_catalog_pdf(properties, pdf_path):
         pdf.set_font('DejaVu', 'B', 11)
         pdf.cell(0, 8, "Цены:", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.set_font('DejaVu', '', 11)
-        pdf.cell(0, 8, text=f"   ● Студия: от {format_price(prices.get('studio'))} THB", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.cell(0, 8, text=f"   ● 1BR: от {format_price(prices.get('1br'))} THB", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.cell(0, 8, text=f"   ● 2BR: от {format_price(prices.get('2br'))} THB", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.cell(0, 8, text=f"   ● 3BR: от {format_price(prices.get('3br'))} THB", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.cell(0, 8, text=f"   ● Пентхаус: от {format_price(prices.get('penthouse'))} THB", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(0, 8, text=f"   ●  Студия: от {format_price(prices.get('studio'))} THB", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(0, 8, text=f"   ●  1BR: от {format_price(prices.get('1br'))} THB", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(0, 8, text=f"   ●  2BR: от {format_price(prices.get('2br'))} THB", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(0, 8, text=f"   ●  3BR: от {format_price(prices.get('3br'))} THB", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(0, 8, text=f"   ●  Пентхаус: от {format_price(prices.get('penthouse'))} THB", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
         add_field("Условия оплаты", prop.get('payments','Не указано'))
 
-        pdf.ln(4)
+        pdf.ln(2)
         comments = str(prop.get('comments','')).replace('\r\n', '\n').replace('\r', '\n')
         pdf.set_font('DejaVu', 'B', 11)
         pdf.cell(0, 8, "Описание:", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.set_font('DejaVu', '', 11)
         pdf.multi_cell(0, 8, comments)
 
-        pdf.ln(2)
-        pdf.set_font('DejaVu', '', 10)
-        pdf.multi_cell(0, 6, text="Запросите подробности у менеджеров Polar Property")
-        pdf.ln(3)
 
     pdf.output(pdf_path)
 # --- Добавьте функцию для добавления анкеты в Notion ---
