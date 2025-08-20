@@ -597,10 +597,21 @@ def escape_html(text):
     return html.escape(str(text))
 
 def _extract_notion_field_value(field):
-    """Надёжно извлекает текстовое значение из поля Notion (title, rich_text, select, number, fallback)."""
+    """Надёжно извлекает текстовое значение из поля Notion (title, rich_text, select, number, formula, fallback)."""
     if not field:
         return ""
-    # title array (Notion new API uses 'title' with 'plain_text' or nested text)
+    # formula (строковый / числовой результат формулы)
+    if field.get("type") == "formula":
+        f = field.get("formula", {})
+        if f.get("type") == "string":
+            return f.get("string") or ""
+        if f.get("type") == "number":
+            n = f.get("number")
+            return "" if n is None else str(n)
+        if f.get("type") == "boolean":
+            return str(f.get("boolean"))
+        return ""
+    # title array
     if field.get("title"):
         texts = []
         for it in field.get("title", []):
@@ -629,26 +640,35 @@ def _extract_notion_field_value(field):
 
 
 def get_visible_object_id(prop):
-    """Ищет видимый в таблице Notion ID (например SALE-13). Игнорирует page-UUID."""
+    """Ищет видимый в таблице Notion ID (например SALE-13). Предпочитает formula с шаблоном, игнорирует page-UUID."""
     uuid_re = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
-    # 1) если уже есть prop['id'] и это не UUID — используем
+    pattern_re = re.compile(r"^[A-ZА-Я]+-\d+$")  # SALE-26, ПРОДАЖА-5 и т.п.
+
     raw_prop_id = (prop or {}).get("id")
     if raw_prop_id:
         s = str(raw_prop_id).strip()
-        if s and not uuid_re.match(s):
+        if s and not uuid_re.match(s) and pattern_re.match(s):
             return s
 
     raw = (prop.get("raw", {}) if prop else {}) or {}
     raw_props = raw.get("properties", {}) or {}
 
-    # 2) формируем приоритетные ключи (включая локализованные варианты)
+    # 1) сначала ищем formula со строковым значением подходящего шаблона
+    for key, val in raw_props.items():
+        if val.get("type") == "formula":
+            f = val.get("formula", {})
+            if f.get("type") == "string":
+                sval = (f.get("string") or "").strip()
+                if sval and pattern_re.match(sval):
+                    return sval
+
+    # 2) формируем приоритетные ключи
     preferred = []
     for key in raw_props.keys():
         kn = key.replace(" ", "").lower()
         if "id" in kn or key.strip().startswith("№") or key.strip().lower().startswith("no"):
             preferred.append(key)
 
-    # 3) затем пробуем preferred, затем все поля
     tried = set()
     for key in preferred + list(raw_props.keys()):
         if key in tried:
@@ -659,14 +679,15 @@ def get_visible_object_id(prop):
         except Exception:
             val = ""
         if val:
-            val = val.strip()
-            # пропускаем UUID-like значения
-            if val and not uuid_re.match(val):
-                return val
-            if uuid_re.match(val):
-                print(f"⚠️ Пропущен UUID в поле '{key}': {val}")
+            sval = val.strip()
+            if sval and not uuid_re.match(sval):
+                # если удовлетворяет шаблону вида XXX-число, сразу берём
+                if pattern_re.match(sval):
+                    return sval
+                # иначе запоминаем как возможный (может быть просто число) — вернём если ничего лучше
+                fallback_val = sval
+                return fallback_val
 
-    # 4) fallback — page id (если ничего другого нет)
     page_id = raw.get("id")
     if page_id:
         return str(page_id)
