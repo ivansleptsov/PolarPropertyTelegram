@@ -723,22 +723,29 @@ async def create_catalog_pdf(properties, pdf_path):
     pdf.add_font('DejaVu', '', 'fonts/DejaVuSans.ttf')
     pdf.add_font('DejaVu', 'B', 'fonts/DejaVuSans-Bold.ttf')
 
-    for idx, prop in enumerate(properties, 1):
-        # Новая страница для каждого объекта
-        pdf.add_page()
+    LABEL_WIDTH = 40  # ширина ячейки для метки
 
-        # Заголовок каталога (на каждой странице для удобства)
+    def add_field(label, value):
+        pdf.set_font('DejaVu', 'B', 11)
+        pdf.cell(LABEL_WIDTH, 8, f"{label}:", border=0)
+        pdf.set_font('DejaVu', '', 11)
+        pdf.cell(0, 8, oneline(value), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+    for idx, prop in enumerate(properties, 1):
+        pdf.add_page()
+        pdf.set_auto_page_break(True, margin=15)
+
+        # Заголовок каталога
         pdf.set_font("DejaVu", 'B', size=12)
         pdf.cell(200, 10, text="Каталог объектов PolarProperty", new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
         pdf.ln(10)
 
-        # Название объекта (без ID на той же строке)
+        # Название проекта
         pdf.set_font("DejaVu", 'B', size=12)
         title_line = f"{idx}. {oneline(prop.get('project_name',''))}"
         pdf.cell(0, 10, text=title_line, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        # Отдельная строка с ID (меньше и не жирная)
         if prop.get('extId'):
-            pdf.set_font("DejaVu", '', size=9)
+            pdf.set_font('DejaVu', '', 9)
             pdf.cell(0, 6, text=f"ID: {oneline(prop['extId'])}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             pdf.ln(1)
         else:
@@ -762,28 +769,34 @@ async def create_catalog_pdf(properties, pdf_path):
                 print(f"⚠️ Не удалось добавить изображение в PDF: {e}")
                 pdf.ln(5)
 
-        pdf.set_font("DejaVu", size=11)
-        pdf.cell(0, 8, text=f"Район: {oneline(prop.get('district','Не указано'))}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.cell(0, 8, text=f"Статус: {oneline(prop.get('status','Не указано'))}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.cell(0, 8, text=f"Застройщик: {oneline(prop.get('developer','Не указано'))}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.cell(0, 8, text=f"Срок сдачи: {oneline(prop.get('enddate','Не указано'))}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        # Поля с жирными метками
+        add_field("Район", prop.get('district','Не указано'))
+        add_field("Статус", prop.get('status','Не указано'))
+        add_field("Застройщик", prop.get('developer','Не указано'))
+        add_field("Срок сдачи", prop.get('enddate','Не указано'))
+
         prices = prop.get('prices', {})
-        pdf.cell(0, 8, text=f"Цены:", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.cell(0, 8, text=f"   - Студия: от {format_price(prices.get('studio'))} THB", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.cell(0, 8, text=f"   - 1BR: от {format_price(prices.get('1br'))} THB", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.cell(0, 8, text=f"   - 2BR: от {format_price(prices.get('2br'))} THB", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.cell(0, 8, text=f"   - 3BR: от {format_price(prices.get('3br'))} THB", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.cell(0, 8, text=f"   - Пентхаус: от {format_price(prices.get('penthouse'))} THB", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.cell(0, 8, text=f"Условия оплаты: {oneline(prop.get('payments','Не указано'))}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        # Отступ между условиями оплаты и описанием
+        pdf.set_font('DejaVu', 'B', 11)
+        pdf.cell(0, 8, "Цены:", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.set_font('DejaVu', '', 11)
+        pdf.cell(0, 8, text=f"   ● Студия: от {format_price(prices.get('studio'))} THB", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(0, 8, text=f"   ● 1BR: от {format_price(prices.get('1br'))} THB", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(0, 8, text=f"   ● 2BR: от {format_price(prices.get('2br'))} THB", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(0, 8, text=f"   ● 3BR: от {format_price(prices.get('3br'))} THB", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(0, 8, text=f"   ● Пентхаус: от {format_price(prices.get('penthouse'))} THB", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+        add_field("Условия оплаты", prop.get('payments','Не указано'))
+
         pdf.ln(4)
         comments = str(prop.get('comments','')).replace('\r\n', '\n').replace('\r', '\n')
-        pdf.multi_cell(0, 8, text=f"Описание: {comments}")
-        # Финальная контактная строка
+        pdf.set_font('DejaVu', 'B', 11)
+        pdf.cell(0, 8, "Описание:", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.set_font('DejaVu', '', 11)
+        pdf.multi_cell(0, 8, comments)
+
         pdf.ln(2)
-        pdf.set_font("DejaVu", '', size=10)
+        pdf.set_font('DejaVu', '', 10)
         pdf.multi_cell(0, 6, text="Запросите подробности у менеджеров Polar Property")
-        pdf.set_font("DejaVu", size=11)
         pdf.ln(3)
 
     pdf.output(pdf_path)
