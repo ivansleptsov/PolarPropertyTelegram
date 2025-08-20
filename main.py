@@ -95,49 +95,98 @@ async def is_user_subscribed(user_id, context):
         return False
 
 async def get_properties():
-    """Получение объектов из Notion с улучшенной обработкой ошибок"""
+    """Получение объектов из Notion с улучшенной обработкой ошибок
+    Возвращает список dict с ключами: project_name, status, district, prices, developer,
+    enddate, payments, comments, photo_url, id
+    """
     try:
-        results = notion.databases.query(database_id=NOTION_DATABASE_OBJECTS_ID).get("results", [])
-        properties = []
+        response = notion.databases.query(database_id=NOTION_DATABASE_OBJECTS_ID)
+        results = response.get("results", [])
 
-        def _get_text(prop):
-            if not prop:
-                return None
-            t = prop.get("type")
-            if t == "title":
-                return "".join([x.get("plain_text", "") for x in prop.get("title", [])]).strip() or None
-            if t == "rich_text":
-                return "".join([x.get("plain_text", "") for x in prop.get("rich_text", [])]).strip() or None
-            if t == "number":
-                return prop.get("number")
-            # fallback: try plain_text if available
-            if isinstance(prop, dict):
-                for k in ("plain_text", "text", "content"):
-                    v = prop.get(k)
-                    if v:
-                        return v
+        if not results:
+            print("⚠️ База данных пуста")
             return None
 
+        properties = []
         for item in results:
-            props = item.get("properties", {})
+            try:
+                props = item.get("properties", {})
 
-            # Попытка получить название проекта (адаптируйте имена полей под вашу базу)
-            project_name = _get_text(props.get("Название")) or _get_text(props.get("Name")) or _get_text(props.get("Project"))
+                # Название проекта (адаптируйте имена полей при необходимости)
+                project_name = props.get("Название проекта", {}).get("title", [{}])[0].get("text", {}).get("content", "Без названия")
+                # Статус и район
+                status = props.get("Статус", {}).get("select", {}).get("name", "Не указано")
+                district = props.get("Район", {}).get("select", {}).get("name", "Не указано")
 
-            # Извлечение уникального ID из столбца "ID"
-            unique_id = _get_text(props.get("ID"))
+                # Застройщик / rich_text
+                developer_rich = props.get("Застройщик", {}).get("rich_text", [])
+                developer = "".join([t.get("text", {}).get("content", "") for t in developer_rich]) if developer_rich else "Не указано"
 
-            # Другие поля (пример — можно расширять)
-            price = None
-            if props.get("Цена"):
-                price = props["Цена"].get("number") if props["Цена"].get("type") == "number" else _get_text(props.get("Цена"))
+                # Срок сдачи
+                enddate = props.get("Срок сдачи", {}).get("number", "Не указано")
 
-            properties.append({
-                "project_name": project_name or "Без названия",
-                "id": unique_id,
-                "price": price,
-                "raw": item
-            })
+                # Условия оплаты
+                payments_rich = props.get("Условия оплаты", {}).get("rich_text", [])
+                payments = "".join([t.get("text", {}).get("content", "") for t in payments_rich]) if payments_rich else "Не указано"
+
+                # Описание
+                comments_rich = props.get("Описание", {}).get("rich_text", [])
+                comments = "".join([t.get("text", {}).get("content", "") for t in comments_rich]) if comments_rich else "Не указано"
+
+                # Цены
+                prices = {
+                    "studio": props.get("Студия (THB)", {}).get("number"),
+                    "1br": props.get("1BR (THB)", {}).get("number"),
+                    "2br": props.get("2BR (THB)", {}).get("number"),
+                    "3br": props.get("3BR (THB)", {}).get("number"),
+                    "penthouse": props.get("Пентхаус (THB)", {}).get("number")
+                }
+
+                # Фото (file / external)
+                photo_url = None
+                photo_field = props.get("Фото", {}).get("files", [])
+                if photo_field:
+                    if "file" in photo_field[0]:
+                        photo_url = fix_drive_url(photo_field[0]["file"].get("url"))
+                    elif "external" in photo_field[0]:
+                        photo_url = fix_drive_url(photo_field[0]["external"].get("url"))
+
+                # Уникальный ID из колонки "ID" (может быть title/rich_text/number)
+                unique_id = ""
+                id_field = props.get("ID") or props.get("Id") or props.get("id")
+                if id_field:
+                    # try different types
+                    if isinstance(id_field.get("number"), (int, float)):
+                        unique_id = str(id_field.get("number"))
+                    elif id_field.get("type") == "title":
+                        unique_id = id_field.get("title", [{}])[0].get("text", {}).get("content", "")
+                    elif id_field.get("type") == "rich_text":
+                        unique_id = "".join([t.get("text", {}).get("content", "") for t in id_field.get("rich_text", [])])
+                    else:
+                        # fallback: try common keys
+                        for k in ("plain_text", "text", "content"):
+                            v = id_field.get(k)
+                            if v:
+                                unique_id = v
+                                break
+
+                properties.append({
+                    "project_name": project_name,
+                    "status": status,
+                    "district": district,
+                    "prices": prices,
+                    "developer": developer,
+                    "enddate": enddate,
+                    "payments": payments,
+                    "comments": comments,
+                    "photo_url": photo_url,
+                    "id": unique_id,
+                    "raw": item
+                })
+
+            except Exception as e:
+                print(f"⚠️ Ошибка обработки объекта: {e}")
+                continue
 
         return properties
 
