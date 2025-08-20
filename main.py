@@ -125,9 +125,12 @@ async def get_properties():
                 # Срок сдачи
                 enddate = props.get("Срок сдачи", {}).get("number", "Не указано")
 
-                # Условия оплаты
-                payments_rich = props.get("Условия оплаты", {}).get("rich_text", [])
-                payments = "".join([t.get("text", {}).get("content", "") for t in payments_rich]) if payments_rich else "Не указано"
+                # Условия оплаты — вычисляем по статусу: если объект сдан -> "по запросу", иначе "рассрочка до конца строительства"
+                status_lower = (status or "").lower()
+                if any(k in status_lower for k in ("сдан", "сдача", "готово", "completed", "ready")):
+                    payments = "по запросу"
+                else:
+                    payments = "рассрочка до конца строительства"
 
                 # Описание
                 comments_rich = props.get("Описание", {}).get("rich_text", [])
@@ -393,7 +396,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"   - 2BR: от {escape_html(format_price(prices['2br']))} THB\n"
             f"   - 3BR: от {escape_html(format_price(prices['3br']))} THB\n"
             f"   - Пентхаус: от {escape_html(format_price(prices['penthouse']))} THB\n"
-            f"💳 Условия оплаты: По запросу\n" #{escape_html(prop['payments'])}
+            f"💳 Условия оплаты: {escape_html(prop.get('payments', 'Не указано'))}\n"
             f"📝 Описание: {escape_html(prop['comments'])}\n"
         )
         reply_markup = InlineKeyboardMarkup([
@@ -431,7 +434,8 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "📥 ЗАЯВКА НА ОБЪЕКТ\n\n"
                 f"👤 Пользователь: {user_name} (@{username})\n"
                 f"🆔 ID: {user_id}\n"
-                f"🏠 Объект: {prop['project_name']}\n"                
+                f"🏠 Объект: {prop.get('project_name')}\n"
+                f"🔖 ID объекта: {prop.get('id', '(не указан)')}\n"
             )
             if ADMIN_IDS:
                 for admin_id in ADMIN_IDS:
@@ -593,67 +597,102 @@ def escape_html(text):
     return html.escape(str(text))
 
 async def add_request_to_notion(user_name, username, user_id, prop):
-    """Добавляет заявку в таблицу Notion. Пытаемся корректно получить ID объекта из разных мест и логируем результат."""
+    """Добавляет заявку в таблицу Notion. Надёжно пытаемся получить видимый в таблице 'ID' (SALE-1 и т.п.)."""
     from datetime import datetime
+    import re
+
     try:
-        # Попытки получить ID объекта из prop
-        id_value = prop.get('id') if prop else None
+        id_value = ""
+        # 1) Если get_properties ранее заполнял prop['id'] — используем, но игнорируем page-UUID
+        raw_prop_id = prop.get("id") if prop else None
+        uuid_re = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+        if raw_prop_id and not uuid_re.match(str(raw_prop_id)):
+            id_value = str(raw_prop_id)
 
-        # Если нет — пробуем page id из raw
+        # 2) Если ещё нет — смотрим в raw.properties: ищем явное поле с именем, содержащим "id"
         if not id_value:
-            raw = prop.get('raw', {}) if prop else {}
-            id_value = raw.get('id')
-
-        # Ещё попытка: посмотреть в свойствах raw -> properties -> ID
-        if not id_value:
-            raw_props = (prop.get('raw', {}) or {}).get('properties', {}) if prop else {}
-            id_field = raw_props.get('ID') or raw_props.get('Id') or raw_props.get('id')
-            if id_field:
-                if isinstance(id_field.get('number'), (int, float)):
-                    id_value = str(id_field.get('number'))
-                elif id_field.get('type') == 'title':
-                    id_value = id_field.get('title', [{}])[0].get('text', {}).get('content', '')
-                elif id_field.get('type') == 'rich_text':
-                    id_value = ''.join([t.get('text', {}).get('content', '') for t in id_field.get('rich_text', [])])
+            raw = (prop.get("raw", {}) if prop else {}) or {}
+            raw_props = raw.get("properties", {}) or {}
+            candidate_field = None
+            # прямые ключи
+            for key in ("ID", "Id", "id", "ID объекта", "ID_объекта"):
+                if key in raw_props:
+                    candidate_field = raw_props[key]
+                    break
+            # если не нашли — ищем любое свойство, в имени которого есть "id"
+            if not candidate_field:
+                for key, val in raw_props.items():
+                    if "id" in key.replace(" ", "").lower():
+                        candidate_field = val
+                        break
+            # если нашли поле — извлекаем значение по типу
+            if candidate_field:
+                # number
+                if isinstance(candidate_field.get("number"), (int, float)):
+                    id_value = str(candidate_field.get("number"))
+                # select -> name
+                elif candidate_field.get("select"):
+                    id_value = candidate_field.get("select", {}).get("name") or ""
+                # title
+                elif candidate_field.get("title"):
+                    id_value = candidate_field.get("title", [{}])[0].get("text", {}).get("content", "") or ""
+                # rich_text
+                elif candidate_field.get("rich_text"):
+                    id_value = "".join([t.get("text", {}).get("content", "") for t in candidate_field.get("rich_text", [])])
+                # formula / plain text fallback
                 else:
-                    for k in ('plain_text', 'text', 'content'):
-                        v = id_field.get(k)
+                    for k in ("plain_text", "text", "content", "string"):
+                        v = candidate_field.get(k)
                         if v:
                             id_value = v
                             break
 
+        # 3) Ещё попытка: иногда нужный ID хранится в другом поле (например 'Код' или 'Code')
         if not id_value:
-            id_value = ''
+            for alt in ("Код", "Code", "Артикул"):
+                field = raw_props.get(alt)
+                if field:
+                    # используем тот же извлекающий блок
+                    if isinstance(field.get("number"), (int, float)):
+                        id_value = str(field.get("number"))
+                    elif field.get("select"):
+                        id_value = field.get("select", {}).get("name") or ""
+                    elif field.get("title"):
+                        id_value = field.get("title", [{}])[0].get("text", {}).get("content", "") or ""
+                    elif field.get("rich_text"):
+                        id_value = "".join([t.get("text", {}).get("content", "") for t in field.get("rich_text", [])])
+                    else:
+                        for k in ("plain_text", "text", "content", "string"):
+                            v = field.get(k)
+                            if v:
+                                id_value = v
+                                break
+                    if id_value:
+                        break
+
+        # 4) Финальный fallback — если есть page id и ничего другого — сохраняем, но логируем что это page-id
+        if not id_value:
+            page_id = (prop.get("raw", {}) or {}).get("id")
+            if page_id:
+                id_value = str(page_id)
+                print(f"⚠️ Внимание: сохраняется page-UUID как ID объекта (нет явного поля 'ID'): {id_value}")
+
+        if not id_value:
+            id_value = ""
 
         print(f"📥 Добавление заявки: object_id='{id_value}', project='{prop.get('project_name')}'")
 
         notion.pages.create(
             parent={"database_id": NOTION_DATABASE_REQUESTS_ID},
             properties={
-                "Пользователь": {
-                    "title": [{"text": {"content": user_name}}]
-                },
-                "Username": {
-                    "rich_text": [{"text": {"content": username}}]
-                },
-                "UserID": {
-                    "rich_text": [{"text": {"content": str(user_id)}}]
-                },
-                "Объект": {
-                    "rich_text": [{"text": {"content": prop.get('project_name', '')}}]
-                },
-                "ID объекта": {
-                    "rich_text": [{"text": {"content": str(id_value)}}]
-                },
-                "Источник": {
-                    "rich_text": [{"text": {"content": "телеграм бот"}}]
-                },
-                "Тип сделки": {
-                    "rich_text": [{"text": {"content": "Продажа"}}]
-                },
-                "Дата": {
-                    "date": {"start": datetime.now().isoformat()}
-                }
+                "Пользователь": {"title": [{"text": {"content": user_name}}]},
+                "Username": {"rich_text": [{"text": {"content": username}}]},
+                "UserID": {"rich_text": [{"text": {"content": str(user_id)}}]},
+                "Объект": {"rich_text": [{"text": {"content": prop.get('project_name', '')}}]},
+                "ID объекта": {"rich_text": [{"text": {"content": str(id_value)}}]},
+                "Источник": {"rich_text": [{"text": {"content": "телеграм бот"}}]},
+                "Тип сделки": {"rich_text": [{"text": {"content": "Продажа"}}]},
+                "Дата": {"date": {"start": datetime.now().isoformat()}}
             }
         )
         print("✅ Заявка добавлена в Notion")
