@@ -760,6 +760,9 @@ async def create_catalog_pdf(properties, pdf_path):
 
     LABEL_WIDTH = 40  # ширина ячейки для метки
 
+    # Дата формирования каталога для заголовка
+    header_date = datetime.datetime.now().strftime("%d.%m.%Y")
+
     def add_field(label, value):
         pdf.set_font('DejaVu', 'B', 11)
         pdf.cell(LABEL_WIDTH, 8, f"{label}:", border=0)
@@ -770,9 +773,9 @@ async def create_catalog_pdf(properties, pdf_path):
         pdf.add_page()
         pdf.set_auto_page_break(True, margin=15)
 
-        # Заголовок каталога
+        # Заголовок каталога с датой
         pdf.set_font("DejaVu", 'B', size=12)
-        pdf.cell(200, 10, text="Каталог объектов PolarProperty", new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
+        pdf.cell(200, 10, text=f"Каталог объектов PolarProperty — {header_date}", new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
         pdf.ln(10)
 
         # Название проекта
