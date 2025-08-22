@@ -224,13 +224,25 @@ async def get_properties():
                     '3br': (props.get('3BR (THB)', {}) or {}).get('number'),
                     'penthouse': (props.get('Пентхаус (THB)', {}) or {}).get('number')
                 }
+
+                # Фото: берём только Google Drive external-ссылки, Notion-uploaded игнорируем
                 photo_url = None
                 photo_field = (props.get('Фото', {}) or {}).get('files', [])
                 if photo_field:
-                    if 'file' in photo_field[0]:
-                        photo_url = fix_drive_url(photo_field[0]['file'].get('url'))
-                    elif 'external' in photo_field[0]:
-                        photo_url = fix_drive_url(photo_field[0]['external'].get('url'))
+                    # приоритет — external ссылки Drive
+                    for f in photo_field:
+                        url = (f.get('external') or {}).get('url')
+                        if url and is_drive_url(url):
+                            photo_url = fix_drive_url(url)
+                            break
+                    # если не нашли среди external, можно проверить 'file' только если это Drive (обычно нет)
+                    if not photo_url:
+                        for f in photo_field:
+                            url = (f.get('file') or {}).get('url')
+                            if url and is_drive_url(url):
+                                photo_url = fix_drive_url(url)
+                                break
+
                 ext_id = extract_external_id(props)
                 if ext_id:
                     print("Parsed extId", item.get('id'), project_name, ext_id)
@@ -245,7 +257,7 @@ async def get_properties():
                     'enddate': enddate,
                     'payments': payments,
                     'comments': comments,
-                    'photo_url': photo_url,
+                    'photo_url': photo_url,  # только Drive или None
                     'extId': ext_id,
                     'page_id': item.get('id'),
                     'raw': item
@@ -731,25 +743,9 @@ def fix_drive_url(url):
         return f"https://drive.google.com/uc?export=view&id={file_id}"
     return url
 
-def oneline(text):
-    """Удаляет переносы строк для использования в pdf.cell"""
-    return str(text).replace('\n', ' ').replace('\r', ' ')
-
-def cleanup_temp_files():
-    """Очищает временные файлы"""
-    import glob
-    try:
-        # Удаляем временные изображения
-        for file in glob.glob("temp_img_*.jpg"):
-            os.remove(file)
-        # Удаляем старые временные PDF
-        for file in glob.glob("catalog_*.pdf"):
-            os.remove(file)
-    except Exception as e:
-        print(f"⚠️ Ошибка очистки временных файлов: {e}")
-
-# 3. Функция для создания PDF
-
+def is_drive_url(url: str) -> bool:
+    """Проверяет, что ссылка ведёт на Google Drive."""
+    return isinstance(url, str) and "drive.google.com" in url
 
 async def create_catalog_pdf(properties, pdf_path):
     from fpdf import FPDF
