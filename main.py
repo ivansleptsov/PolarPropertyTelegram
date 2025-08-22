@@ -602,7 +602,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             normalized = validate_and_format_phone(user_text)
             if not normalized:
                 await update.message.reply_text(
-                    "⚠️ Похоже, номер некорректен. Введите номер в международном формате, например: +66968300106",
+                    "⚠️ Похоже, номер некорректен. Введите номер в международном формате, например: +79123456789 или +66968300106",
                     reply_markup=get_back_button()
                 )
                 return  # остаёмся на том же шаге
