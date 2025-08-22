@@ -594,7 +594,22 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if isinstance(state, dict) and state.get("type") == "selection":
         step = state.get("step", 0)
         data = state.get("data", {})
-        data[SELECTION_STEPS[step]] = update.message.text
+        current_key = SELECTION_STEPS[step]
+        user_text = (update.message.text or '').strip()
+
+        # Проверка номера телефона на соответствующем шаге
+        if current_key == 'phone':
+            normalized = validate_and_format_phone(user_text)
+            if not normalized:
+                await update.message.reply_text(
+                    "⚠️ Похоже, номер некорректен. Введите номер в международном формате, например: +66968300106",
+                    reply_markup=get_back_button()
+                )
+                return  # остаёмся на том же шаге
+            data['phone'] = normalized
+        else:
+            data[current_key] = user_text
+
         step += 1
 
         if step < len(SELECTION_QUESTIONS):
@@ -657,6 +672,26 @@ def format_price(price):
 def escape_html(text):
     """Экранирует спецсимволы для HTML"""
     return html.escape(str(text))
+
+# Валидация телефона: принимает международный формат с "+", допускает пробелы/скобки/дефисы, нормализует к "+<digits>"
+def validate_and_format_phone(raw):
+    try:
+        s = str(raw or '').strip()
+        # Подсчитываем цифры и нормализуем
+        digits = ''.join(ch for ch in s if ch.isdigit())
+        has_plus = s.startswith('+')
+        if has_plus:
+            # + и 8..15 цифр по E.164
+            if 8 <= len(digits) <= 15:
+                return '+' + digits
+            return None
+        else:
+            # Без "+" допускаем 10..15 цифр, нормализуем, добавив "+"
+            if 10 <= len(digits) <= 15:
+                return '+' + digits
+            return None
+    except Exception:
+        return None
 
 async def add_request_to_notion(user_name, username, user_id, prop):
     """Добавляет заявку в таблицу Notion. Использует видимый ID объекта (SALE-1 и т.п.) если он есть."""
