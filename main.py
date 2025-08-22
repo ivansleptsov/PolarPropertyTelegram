@@ -747,6 +747,10 @@ def is_drive_url(url: str) -> bool:
     """Проверяет, что ссылка ведёт на Google Drive."""
     return isinstance(url, str) and "drive.google.com" in url
 
+# Приводит многострочный текст к одной строке для pdf.cell
+def oneline(text):
+    return str(text).replace('\n', ' ').replace('\r', ' ')
+
 async def create_catalog_pdf(properties, pdf_path):
     from fpdf import FPDF
 
@@ -890,6 +894,18 @@ async def on_startup(app):
             print(f"⚠️ Ошибка запуска планировщика: {e}")
     else:
         print("⚠️ Тестовый режим: обновление PDF и планировщик отключены")    
+# Очистка временных файлов (вызывается при старте)
+def cleanup_temp_files():
+    import glob
+    try:
+        for pattern in ("temp_img_*.jpg", "catalog_*.pdf", "*.tmp_pages.pdf"):
+            for file in glob.glob(pattern):
+                try:
+                    os.remove(file)
+                except Exception:
+                    pass
+    except Exception as e:
+        print(f"⚠️ Ошибка очистки временных файлов: {e}")
 # --- Добавьте состояния и вопросы для анкеты ---
 SELECTION_STEPS = [
     "name",
