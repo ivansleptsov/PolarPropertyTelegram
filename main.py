@@ -753,20 +753,14 @@ async def create_catalog_pdf(properties, pdf_path):
     from fpdf import FPDF
     import os
 
-    # Класс PDF с логотипом внизу справа на каждой странице
+    # Класс PDF: убираем логотип из футера
     class CatalogPDF(FPDF):
         def __init__(self, *args, **kwargs):
             self.logo_path = kwargs.pop('logo_path', None)
             super().__init__(*args, **kwargs)
         def footer(self):
-            if self.logo_path and os.path.exists(self.logo_path):
-                try:
-                    logo_w, logo_h = 18, 6  # мм
-                    x = self.w - self.r_margin - logo_w
-                    y = self.h - self.b_margin - logo_h
-                    self.image(self.logo_path, x=x, y=y, w=logo_w, h=logo_h)
-                except Exception:
-                    pass
+            # Логотип во футере отключён по требованию
+            pass
 
     tmp_pages_path = pdf_path + ".tmp_pages.pdf"
     cover_path = "cover.pdf"
@@ -791,10 +785,25 @@ async def create_catalog_pdf(properties, pdf_path):
         pdf.add_page()
         pdf.set_auto_page_break(True, margin=15)
 
-        # Заголовок каталога с датой
+        # Верхний логотип по центру (кроме обложки, она отдельным файлом)
+        if os.path.exists(logo_path):
+            try:
+                logo_w = 65  # мм: увеличенный размер для A4
+                logo_h_est = 14  # мм: ориентировочная высота для расчёта отступа
+                x = (pdf.w - logo_w) / 2
+                y = pdf.t_margin
+                pdf.image(logo_path, x=x, y=y, w=logo_w)  # высоту не задаём — сохраняем пропорции
+                pdf.set_xy(pdf.l_margin, y + logo_h_est + 4)
+            except Exception:
+                # если не удалось отрисовать, просто отступ сверху
+                pdf.set_y(pdf.t_margin + 20)
+        else:
+            pdf.set_y(pdf.t_margin + 2)
+
+        # Заголовок каталога с датой (без бренда, он на логотипе)
         pdf.set_font("DejaVu", 'B', size=12)
-        pdf.cell(200, 10, text=f"Каталог объектов PolarProperty — {header_date}", new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
-        pdf.ln(10)
+        pdf.cell(200, 10, text=f"Каталог объектов — {header_date}", new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
+        pdf.ln(6)
 
         # Название проекта
         pdf.set_font("DejaVu", 'B', size=12)
