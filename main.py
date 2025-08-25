@@ -753,8 +753,28 @@ def oneline(text):
 
 async def create_catalog_pdf(properties, pdf_path):
     from fpdf import FPDF
+    import os
 
-    pdf = FPDF()
+    # Класс PDF с логотипом внизу справа на каждой странице
+    class CatalogPDF(FPDF):
+        def __init__(self, *args, **kwargs):
+            self.logo_path = kwargs.pop('logo_path', None)
+            super().__init__(*args, **kwargs)
+        def footer(self):
+            if self.logo_path and os.path.exists(self.logo_path):
+                try:
+                    logo_w, logo_h = 18, 6  # мм
+                    x = self.w - self.r_margin - logo_w
+                    y = self.h - self.b_margin - logo_h
+                    self.image(self.logo_path, x=x, y=y, w=logo_w, h=logo_h)
+                except Exception:
+                    pass
+
+    tmp_pages_path = pdf_path + ".tmp_pages.pdf"
+    cover_path = "cover.pdf"
+    logo_path = "logo_black.png"
+
+    pdf = CatalogPDF(logo_path=logo_path)
     pdf.add_font('DejaVu', '', 'fonts/DejaVuSans.ttf')
     pdf.add_font('DejaVu', 'B', 'fonts/DejaVuSans-Bold.ttf')
 
@@ -832,8 +852,52 @@ async def create_catalog_pdf(properties, pdf_path):
         pdf.set_font('DejaVu', '', 11)
         pdf.multi_cell(0, 8, comments)
 
+    # Сохраняем временный PDF со страницами каталога
+    try:
+        pdf.output(tmp_pages_path)
+    except Exception as e:
+        print(f"❌ Ошибка генерации PDF страниц каталога: {e}")
+        return
 
-    pdf.output(pdf_path)
+    # Объединяем: обложка (первая страница cover.pdf) + сгенерированные страницы
+    try:
+        from pypdf import PdfReader, PdfWriter
+        writer = PdfWriter()
+        if os.path.exists(cover_path):
+            try:
+                cover_reader = PdfReader(cover_path)
+                if len(cover_reader.pages) > 0:
+                    writer.add_page(cover_reader.pages[0])
+            except Exception as e:
+                print(f"⚠️ Не удалось прочитать cover.pdf: {e}")
+        else:
+            print("⚠️ Обложка cover.pdf не найдена — формируем каталог без неё")
+
+        try:
+            gen_reader = PdfReader(tmp_pages_path)
+            for p in gen_reader.pages:
+                writer.add_page(p)
+        except Exception as e:
+            print(f"❌ Ошибка чтения временных страниц каталога: {e}")
+            return
+
+        with open(pdf_path, 'wb') as out_f:
+            writer.write(out_f)
+    except Exception as e:
+        print(f"❌ Ошибка объединения обложки и каталога: {e}")
+        # Фолбэк: копируем сгенерированные страницы как итоговый PDF
+        try:
+            import shutil
+            if os.path.exists(tmp_pages_path):
+                shutil.copyfile(tmp_pages_path, pdf_path)
+        except Exception as ee:
+            print(f"❌ Резервная запись каталога без обложки не удалась: {ee}")
+    finally:
+        try:
+            if os.path.exists(tmp_pages_path):
+                os.remove(tmp_pages_path)
+        except Exception:
+            pass
 # --- Добавьте функцию для добавления анкеты в Notion ---
 async def add_selection_to_notion(user_name, username, user_id, data):
     """Добавляет запрос консультации (только имя и телефон) в таблицу Notion"""
