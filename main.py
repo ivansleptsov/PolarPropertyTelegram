@@ -791,7 +791,8 @@ async def create_catalog_pdf(properties, pdf_path):
                 logo_w = 130  # мм: увеличенный размер по требованию
                 logo_h_est = 28  # мм: ориентировочная высота для расчёта отступа под 130 мм ширину
                 x = (pdf.w - logo_w) / 2
-                y = pdf.t_margin
+                # Поднимаем лого на 20 мм выше стандартного верхнего отступа, но не выше границы страницы
+                y = max(0, pdf.t_margin - 20)
                 pdf.image(logo_path, x=x, y=y, w=logo_w)  # высоту не задаём — сохраняем пропорции
                 pdf.set_xy(pdf.l_margin, y + logo_h_est + 4)
             except Exception:
