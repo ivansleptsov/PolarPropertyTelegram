@@ -788,8 +788,8 @@ async def create_catalog_pdf(properties, pdf_path):
         # Верхний логотип по центру (кроме обложки, она отдельным файлом)
         if os.path.exists(logo_path):
             try:
-                logo_w = 65  # мм: увеличенный размер для A4
-                logo_h_est = 14  # мм: ориентировочная высота для расчёта отступа
+                logo_w = 130  # мм: увеличенный размер по требованию
+                logo_h_est = 28  # мм: ориентировочная высота для расчёта отступа под 130 мм ширину
                 x = (pdf.w - logo_w) / 2
                 y = pdf.t_margin
                 pdf.image(logo_path, x=x, y=y, w=logo_w)  # высоту не задаём — сохраняем пропорции
