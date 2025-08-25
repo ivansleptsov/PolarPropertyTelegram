@@ -794,12 +794,16 @@ async def create_catalog_pdf(properties, pdf_path):
                 # Поднимаем лого на 20 мм выше стандартного верхнего отступа (без ограничения по границе страницы)
                 y = pdf.t_margin - 20
                 pdf.image(logo_path, x=x, y=y, w=logo_w)  # высоту не задаём — сохраняем пропорции
-                pdf.set_xy(pdf.l_margin, y + logo_h_est + 4)
+                # Убираем прежнюю привязку позиции к высоте лого
+                # (заголовок будет привязан к фиксированным 42 мм от верха страницы)
             except Exception:
                 # если не удалось отрисовать, просто отступ сверху
                 pdf.set_y(pdf.t_margin + 20)
         else:
             pdf.set_y(pdf.t_margin + 2)
+
+        # Фиксируем заголовок на 42 мм от верхнего края страницы
+        pdf.set_xy(pdf.l_margin, 42)
 
         # Заголовок каталога с датой (без бренда, он на логотипе)
         pdf.set_font("DejaVu", 'B', size=12)
