@@ -144,7 +144,7 @@ def extract_external_id(page_properties: dict) -> str:
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Главное меню"""
-    photo_url = "https://drive.google.com/uc?export=view&id=1xd94PeEWKPT3TX9T08xd_-acx_TB8ntc"
+    photo_url = "https://drive.google.com/uc?export=view&id=1pQQvZyx_th1rUK6dbyhvrS1P03S0Uk8W"
     text = (
         " Добро пожаловать в PolarProperty Asia! \n\n"
         "🏝 Мы помогаем купить или арендовать недвижимость в Паттайе и по всему Таиланду.\n\n"
@@ -293,9 +293,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     elif query.data == "rent_menu":
-        wa_msg = "Здравствуйте! Интересует аренда недвижимости в Таиланде."
-        wa_msg_encoded = wa_msg.replace(" ", "%20")
-
+       
         contact_text = (
             "👋 По всем вопросам по поводу аренды напишите нашим менеджерам:\n\n"
             "👩‍💼 Любовь\n"
