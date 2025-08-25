@@ -144,7 +144,7 @@ def extract_external_id(page_properties: dict) -> str:
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Главное меню"""
-    photo_url = "https://drive.google.com/uc?export=view&id=1yiRRSf7Ni8sB_nVm4DqRUNCHdDmQSKFm"
+    photo_url = "https://drive.google.com/uc?export=view&id=1xd94PeEWKPT3TX9T08xd_-acx_TB8ntc"
     text = (
         " Добро пожаловать в PolarProperty Asia! \n\n"
         "🏝 Мы помогаем купить или арендовать недвижимость в Паттайе и по всему Таиланду.\n\n"
