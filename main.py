@@ -959,9 +959,10 @@ async def on_startup(app):
             
         # Запускаем планировщик для еженедельного обновления
         try:
-            scheduler = AsyncIOScheduler(timezone="UTC")
+            loop = asyncio.get_running_loop()
+            scheduler = AsyncIOScheduler(timezone="UTC", event_loop=loop)
             scheduler.add_job(
-                lambda: asyncio.create_task(scheduled_update_pdf()), 
+                scheduled_update_pdf, 
                 "cron", 
                 day_of_week="mon", 
                 hour=10, 
