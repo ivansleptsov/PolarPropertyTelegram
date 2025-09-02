@@ -959,6 +959,14 @@ async def keep_alive_ping():
 async def on_startup(app):
     print("🚀 Запуск бота...")
     
+    # Проверяем, что токен корректный и бот доступен
+    try:
+        bot_info = await app.bot.get_me()
+        print(f"👤 Бот @{bot_info.username} ({bot_info.first_name}) запущен")
+    except Exception as e:
+        print(f"❌ Ошибка получения информации о боте: {e}")
+        return
+    
     # Очищаем старые временные файлы
     cleanup_temp_files()
     
@@ -980,11 +988,11 @@ async def on_startup(app):
                 hour=10, 
                 minute=0
             )
-            # Keep-alive ping каждые 10 минут для предотвращения засыпания
+            # Keep-alive ping каждые 14 минут для предотвращения засыпания
             scheduler.add_job(
                 keep_alive_ping,
                 "interval",
-                minutes=10
+                minutes=14
             )
             scheduler.start()
             print("✅ Планировщик запущен")
