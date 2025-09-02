@@ -943,6 +943,18 @@ async def scheduled_update_pdf():
             print(f"❌ Ошибка обновления PDF: {e}")
     else:
         print("❌ Нет объектов для формирования PDF")
+
+async def keep_alive_ping():
+    """Ping для предотвращения засыпания на Render"""
+    try:
+        import aiohttp
+        port = os.environ.get('PORT', '8000')
+        url = f"http://localhost:{port}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=5) as response:
+                print("🏓 Keep-alive ping отправлен")
+    except Exception as e:
+        print(f"⚠️ Keep-alive ping failed: {e}")
         
 async def on_startup(app):
     print("🚀 Запуск бота...")
@@ -967,6 +979,12 @@ async def on_startup(app):
                 day_of_week="mon", 
                 hour=10, 
                 minute=0
+            )
+            # Keep-alive ping каждые 10 минут для предотвращения засыпания
+            scheduler.add_job(
+                keep_alive_ping,
+                "interval",
+                minutes=10
             )
             scheduler.start()
             print("✅ Планировщик запущен")
