@@ -1003,5 +1003,28 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(handle_buttons))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_messages))
     print("✅ Бот запущен")
+    
+    # Для деплоя на Render: простой веб-сервер для health-check
+    import threading
+    from http.server import HTTPServer, BaseHTTPRequestHandler
+    
+    class HealthHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"Bot is running")
+        def log_message(self, format, *args):
+            pass  # отключаем логи HTTP
+    
+    def start_health_server():
+        port = int(os.environ.get('PORT', 8000))
+        server = HTTPServer(('0.0.0.0', port), HealthHandler)
+        print(f"🌐 Health server запущен на порту {port}")
+        server.serve_forever()
+    
+    # Запускаем health-сервер в отдельном потоке
+    health_thread = threading.Thread(target=start_health_server, daemon=True)
+    health_thread.start()
+    
     app.run_polling()
 
