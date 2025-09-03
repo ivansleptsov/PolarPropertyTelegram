@@ -948,11 +948,14 @@ async def keep_alive_ping():
     """Ping для предотвращения засыпания на Render"""
     try:
         import aiohttp
-        port = os.environ.get('PORT', '8000')
-        url = f"http://localhost:{port}"
+        # Пингуем внешний URL сервиса на Render
+        url = "https://polarpropertytelegrambot.onrender.com/"
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=5) as response:
-                print("🏓 Keep-alive ping отправлен")
+            async with session.get(url, timeout=10) as response:
+                if response.status == 200:
+                    print("🏓 Keep-alive ping успешен")
+                else:
+                    print(f"⚠️ Keep-alive ping: статус {response.status}")
     except Exception as e:
         print(f"⚠️ Keep-alive ping failed: {e}")
         
@@ -988,11 +991,11 @@ async def on_startup(app):
                 hour=10, 
                 minute=0
             )
-            # Keep-alive ping каждые 14 минут для предотвращения засыпания
+            # Keep-alive ping каждые 13 минут для предотвращения засыпания
             scheduler.add_job(
                 keep_alive_ping,
                 "interval",
-                minutes=14
+                minutes=13
             )
             scheduler.start()
             print("✅ Планировщик запущен")
